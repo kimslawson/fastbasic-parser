@@ -1,0 +1,37 @@
+for i = 0 to 5
+  if i = 0
+    print "zero"
+  elif i = 1
+    print "one"
+  elif i = 2
+    print "two"
+  else
+    print "many"
+  endif
+  if i > 3
+    print "big"
+  elif i = 3
+    print "three"
+  endif
+next i
+' Comments must be kept
+' fbp: fixed a = 1
+if 1 = 0
+  print "zero"
+else ' not zero
+  if 1 = 1
+    print "one"
+  endif
+endif
+if 1 = 0
+  print "zero"
+elif 1 = 1 ' one?
+  print "one"
+endif ' end inner
+if 1 = 0
+  print "zero"
+else
+  if 1 = 1
+    print "one"
+  endif ' end inner
+endif ' end outer

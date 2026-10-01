@@ -786,6 +786,162 @@ class short_writer
         }
     }
 
+    static bool is_endif(const ostmt &s)
+    {
+        return s.toks.size() == 1 && is_kw(s.toks[0], "Endif");
+    }
+
+    static bool is_else(const ostmt &s)
+    {
+        return s.toks.size() == 1 && is_kw(s.toks[0], "ELse");
+    }
+
+    // Returns the position of THEN in an IF statement, or 0
+    static size_t then_pos(const std::vector<token> &t)
+    {
+        for(size_t i = 0; i < t.size(); i++)
+            if(is_kw(t[i], "Then") && t[i].table == "THEN_OR_MULTILINE")
+                return i;
+        return 0;
+    }
+
+    static bool is_block_if(const ostmt &s)
+    {
+        return !s.toks.empty() && is_kw(s.toks[0], "If") && !then_pos(s.toks);
+    }
+
+    // Renders tokens without verification, with the shortest form or with
+    // the safest form.
+    std::string plain_render(const std::vector<token> &toks, bool safe) const
+    {
+        auto pc = make_pieces(toks);
+        std::vector<bool> force(pc.size(), false);
+        if(safe)
+            for(size_t i = 0; i < pc.size(); i++)
+            {
+                pc[i].choice = pc[i].safe;
+                force[i] = i && risky(pc[i - 1], pc[i]);
+            }
+        return join(pc, force);
+    }
+
+    // Converts ELSE followed by an IF block to ELIF. The innermost blocks are
+    // converted first, so the verification starts from the original state.
+    void opt_elif()
+    {
+        bool changed = true;
+        while(changed)
+        {
+            changed = false;
+            for(size_t k = out.size(); k-- > 0 && !changed;)
+            {
+                if(k + 2 >= out.size())
+                    continue;
+                if(!is_else(out[k]) || out[k + 1].toks.empty() ||
+                   !is_kw(out[k + 1].toks[0], "If"))
+                    continue;
+                auto &iff = out[k + 1];
+                size_t tp = then_pos(iff.toks);
+                // Find the end of the IF block, must be followed by ENDIF
+                size_t m = 0;
+                if(tp)
+                    m = k + 1;
+                else
+                {
+                    int depth = 0;
+                    for(size_t j = k + 1; j < out.size() && !m; j++)
+                    {
+                        if(is_block_if(out[j]))
+                            depth++;
+                        else if(is_endif(out[j]) && --depth == 0)
+                            m = j;
+                    }
+                }
+                if(!m || m + 1 >= out.size() || !is_endif(out[m + 1]))
+                    continue;
+                // Limit the size of the statement for the native compiler
+                code_map code;
+                for(size_t i = out[k].first; i < iff.last; i++)
+                    for(auto &x : p.stmts[i].code)
+                        code[x.first].insert(code[x.first].end(), x.second.begin(),
+                                             x.second.end());
+                if(code_size(code) > 240)
+                    continue;
+
+                ostmt e;
+                e.first = out[k].first;
+                e.last = iff.last;
+                e.changed = true;
+                e.toks.push_back(make_tok(tk::kw, "ELIf", "STATEMENT"));
+                e.toks.insert(e.toks.end(), iff.toks.begin() + 1,
+                              tp ? iff.toks.begin() + tp : iff.toks.end());
+                ostmt y; // Statement after THEN
+                y.first = y.last = iff.last;
+                y.changed = true;
+                if(tp)
+                    y.toks.assign(iff.toks.begin() + tp + 1, iff.toks.end());
+
+                size_t first = out[k].first, last = out[m + 1].last;
+                size_t old_len = 0;
+                for(size_t i = k; i <= m + 1; i++)
+                    old_len += out[i].text.size() + 1;
+
+                bool ok = false;
+                for(int safe = 0; safe < 2 && !ok; safe++)
+                {
+                    if(tp)
+                    {
+                        y.text = plain_render(y.toks, safe);
+                        auto endif_text = out[m + 1].text;
+                        ok = render(
+                            e.toks,
+                            [&](const std::string &x)
+                            {
+                                return ver.check(first, last, {x, y.text, endif_text},
+                                                 mode);
+                            },
+                            e.text, false);
+                    }
+                    else
+                    {
+                        std::vector<std::string> texts(1);
+                        for(size_t i = k + 2; i <= m; i++)
+                            texts.push_back(out[i].text);
+                        ok = render(
+                            e.toks,
+                            [&](const std::string &x)
+                            {
+                                texts[0] = x;
+                                return ver.check(first, last, texts, mode);
+                            },
+                            e.text, false);
+                    }
+                }
+                if(!ok)
+                    continue;
+                size_t new_len = e.text.size() + 1 + (tp ? y.text.size() + 1 : 0);
+                for(size_t i = k + 2; i <= m + 1; i++)
+                    new_len += out[i].text.size() + 1;
+                new_len -= tp ? 0 : out[m + 1].text.size() + 1;
+                if(new_len >= old_len)
+                    continue;
+                if(tp)
+                {
+                    out[k] = e;
+                    out[k + 1] = y;
+                }
+                else
+                {
+                    out[m].last = out[m + 1].last;
+                    out.erase(out.begin() + m + 1);
+                    out[k] = e;
+                    out.erase(out.begin() + k + 1);
+                }
+                changed = true;
+            }
+        }
+    }
+
     // Converts IF/ENDIF blocks with one statement to IF/THEN
     void opt_if_then()
     {
@@ -1227,6 +1383,8 @@ class short_writer
         }
         if(for_long)
             return true;
+        if(O[OPT_ELIF])
+            opt_elif();
         if(O[OPT_IF_THEN])
             opt_if_then();
         if(O[OPT_END])

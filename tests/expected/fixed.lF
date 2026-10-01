@@ -1,0 +1,25 @@
+' Minified-style program with constant variables
+' fbp: fixed B = 53248
+' fbp: fixed C = 704
+' fbp: fixed H$ = "Score: "
+' fbp: fixed D = -1
+poke 704 + 1, 15
+for I = 0 to 3
+  poke 53248 + I, I * 16
+next I
+print "Score: "; -1; " "; "Score: "
+X = 5
+X = X + 1
+print X, -(53248)
+if 53248 = 1
+  print 1
+elif 704 <> 0
+  print 2
+endif
+' Not fixed: used before by a PROC
+exec SHOW
+E = 10
+
+proc SHOW
+  print E
+endproc

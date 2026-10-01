@@ -427,13 +427,48 @@ static size_t inc_array(const std::vector<codew> &a, size_t i, const std::vector
     return 0;
 }
 
+// Checks for the assignment of a constant to a replaced variable at b[j],
+// returns the length of the sequence or 0.
+static size_t const_assign(const std::vector<codew> &b, size_t j, const const_vars &cv)
+{
+    // X = number: TOK_BYTE/TOK_NUM n, TOK_VAR_STORE, X
+    if(j + 3 < b.size() && b[j + 2].is_tok("TOK_VAR_STORE") && b[j + 3].is_varn())
+    {
+        auto it = cv.find(var_name(b[j + 3]));
+        auto x = b[j], y = b[j + 1];
+        if(it != cv.end() &&
+           ((x.is_tok("TOK_BYTE") && y.is_byte()) || (x.is_tok("TOK_NUM") && y.is_word())) &&
+           it->second == "N" + std::to_string(y.get_val() & 0xFFFF))
+            return 4;
+    }
+    // X$ = string: TOK_VAR_SADDR, X, TOK_CSTRING, string, TOK_COPY_STR
+    if(j + 4 < b.size() && b[j].is_tok("TOK_VAR_SADDR") && b[j + 1].is_varn() &&
+       b[j + 2].is_tok("TOK_CSTRING") && b[j + 3].is_string() &&
+       b[j + 4].is_tok("TOK_COPY_STR"))
+    {
+        auto it = cv.find(var_name(b[j + 1]));
+        auto y = b[j + 3];
+        if(it != cv.end() && it->second == "S" + y.get_str())
+            return 5;
+    }
+    return 0;
+}
+
 bool code_equal_subst(const std::vector<codew> &a, const std::vector<codew> &b,
                       const const_vars &cv)
 {
     static const name_map empty;
     size_t i = 0, j = 0;
-    while(i < a.size() && j < b.size())
+    while(j < b.size())
     {
+        // Assignment of the constant to a variable, only in "b"
+        if(auto n = const_assign(b, j, cv))
+        {
+            j += n;
+            continue;
+        }
+        if(i >= a.size())
+            return false;
         // INC / DEC
         if(auto n = inc_var(a, i, b, j))
         {

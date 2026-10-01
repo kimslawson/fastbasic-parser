@@ -34,14 +34,18 @@ static const opt_info opts[OPT_COUNT] = {
      "Remove the variable name after NEXT, FastBasic does not use it."},
     {"defaults", true, true,
      "Remove default values: 'STEP 1' in FOR, '0' in PAUSE and the 'WORD'\n"
-     "type in DIM and DATA."},
+     "type in DIM and DATA.", true},
     {"const_fold", true, true,
      "Replace integer operations on constants with the result: 'POKE 704+4,0'\n"
-     "becomes 'POKE 708,0'."},
+     "becomes 'POKE 708,0'.", true},
     {"cmp_zero", true, true,
-     "Remove comparisons with zero in conditions: 'IF X<>0' becomes 'IF X'."},
+     "Remove comparisons with zero in conditions: 'IF X<>0' becomes 'IF X'.", true},
     {"if_then", true, true,
      "Replace IF / ENDIF blocks with only one statement with IF / THEN."},
+    {"elif", true, true,
+     "Replace ELSE followed by an IF block with ELIF, removing one ENDIF.\n"
+     "In the long listing this is done by default, use '-O -elif' to disable.",
+     true},
     {"end", true, true, "Remove the END statement at the end of the program."},
     {"inc_dec", false, true,
      "Replace 'X=X+1' with 'INC X' and 'X=X-1' with 'DEC X', also on array\n"
@@ -55,6 +59,12 @@ static const opt_info opts[OPT_COUNT] = {
      "Replace 'CHR$(n)' with a string containing the character, this makes\n"
      "the listing shorter but the compiled code a little bigger. Only\n"
      "applies to the short listing."},
+    {"fixed_vars", false, false,
+     "The reverse of 'const_replace', for de-obfuscating: replace variables\n"
+     "that are assigned only once, with a constant at the start of the\n"
+     "program, with the value. The assignment is replaced by a comment.\n"
+     "Only applies to the long listing.",
+     true},
 };
 
 const opt_info &opt_get(int id)
@@ -105,11 +115,14 @@ bool opt_settings::apply(const std::string &arg)
     if(id < 0)
         return false;
     on[id] = set;
+    given[id] = true;
     return true;
 }
 
 void opt_list(std::ostream &os)
 {
+    os << "In the long listing (-l), only 'const_fold', 'cmp_zero', 'defaults',\n"
+          "'elif' and 'fixed_vars' are applied.\n\n";
     os << "Optimizations enabled with plain '-O', the compiled code is the same:\n\n";
     for(int i = 0; i < OPT_COUNT; i++)
         if(opts[i].same_code)
@@ -120,7 +133,8 @@ void opt_list(std::ostream &os)
             os << "\n";
         }
     os << "\nOptimizations that change the compiled code, enable with '-O +name'\n"
-          "(all are enabled with '-S'), the result is verified to be equivalent:\n\n";
+          "(all except 'fixed_vars' are enabled with '-S'), the result is verified\n"
+          "to be equivalent:\n\n";
     for(int i = 0; i < OPT_COUNT; i++)
         if(!opts[i].same_code)
         {

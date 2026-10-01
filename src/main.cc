@@ -136,8 +136,13 @@ static std::string verify_output(const grammar &g, const program &p,
         err = r.parse_text(g, text, in, false);
         if(!err.empty())
             return "the output can't be parsed:\n" + err;
-        if(!code_equal_subst(q.full_code(false), r.full_code(false, st.init_stmts),
-                             st.cvars))
+        // With fixed_vars, the constants are in the output; with
+        // const_replace, the variables are in the output.
+        bool eq = st.reverse_subst
+                      ? code_equal_subst(r.full_code(false), q.full_code(false), st.cvars)
+                      : code_equal_subst(q.full_code(false), r.full_code(false, st.init_stmts),
+                                         st.cvars);
+        if(!eq)
             return "the output does not produce equivalent code.";
     }
     return std::string();

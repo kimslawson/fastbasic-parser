@@ -64,7 +64,7 @@ for f in *.bas; do
             tgt=atari-int
         fi
     fi
-    for mode in l s sO SX S; do
+    for mode in l s sO SX S lF; do
         case $mode in
             l)  opt="-l";    fbopt="-n" ;;
             s)  opt="-s";    fbopt="-n" ;;
@@ -73,6 +73,7 @@ for f in *.bas; do
             SX) opt="-S -O -const_replace -O -chr_str -O -inc_dec"; fbopt="" ;;
             # With all optimizations, only checks that it compiles
             S)  opt="-S";    fbopt="" ;;
+            lF) opt="-l -O +fixed_vars"; fbopt="" ;;
         esac
         total=$((total + 1))
         out="$b.fbp-$mode.bas"
@@ -90,7 +91,7 @@ for f in *.bas; do
             fail=$((fail + 1))
             continue
         fi
-        if [ $mode = S ]; then
+        if [ $mode = S ] || [ $mode = lF ]; then
             continue
         fi
         normalize "$b.asm" > "$b.orig.n"

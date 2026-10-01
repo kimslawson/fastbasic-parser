@@ -56,6 +56,7 @@ struct list_stats
     std::string pre_text;  // Listing before the transformations
     ::const_vars cvars;    // Constants replaced by variables
     int init_stmts = 0;    // Number of statements added at the start
+    bool reverse_subst = false; // Variables replaced by constants (fixed_vars)
 };
 
 //---------------------------------------------------------------------

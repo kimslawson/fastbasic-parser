@@ -33,11 +33,14 @@ enum opt_id
     OPT_CONST_FOLD,
     OPT_CMP_ZERO,
     OPT_IF_THEN,
+    OPT_ELIF,
     OPT_END,
     // Changes the compiled code, only enabled explicitly or by "-S"
     OPT_INC_DEC,
     OPT_CONST_REPLACE,
     OPT_CHR_STR,
+    // Only for the long listing
+    OPT_FIXED_VARS,
     OPT_COUNT
 };
 
@@ -49,11 +52,15 @@ struct opt_info
     // Makes the listing shorter, enabled by "-S"
     bool shorter;
     const char *desc;
+    // Applies to the long listing
+    bool in_long = false;
 };
 
 struct opt_settings
 {
     bool on[OPT_COUNT] = {};
+    // Options given explicitly in the command line
+    bool given[OPT_COUNT] = {};
 
     bool operator[](opt_id i) const { return on[i]; }
     bool any() const;

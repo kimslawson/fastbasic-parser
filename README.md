@@ -145,6 +145,7 @@ as the original (after the FastBasic optimizer, as the cross-compiler does):
 | `const_fold` | Compute integer operations on constants: `POKE 704+4,15*16` becomes `P.708,240`. |
 | `cmp_zero`   | Remove comparisons with zero in conditions: `IF X<>0` becomes `IF X`. |
 | `if_then`    | Replace `IF`/`ENDIF` blocks with only one statement by `IF`/`THEN`. |
+| `elif`       | Replace `ELSE` followed by an `IF` block with `ELIF`, removing one `ENDIF`; also `ELSE` / `IF c THEN s` / `ENDIF` becomes `ELIF c` / `s` / `ENDIF`. Done by default in the long listing. |
 | `end`        | Remove `END` at the end of the main program. |
 
 Optimizations that change the compiled code, enabled with `-O +name` or with
@@ -157,8 +158,39 @@ substitution done:
 | `const_replace` | Replace numbers and strings used many times with a new variable assigned at the start of the program, if the listing gets shorter. The code is a little bigger and slower. Not done if the program uses `CLR`. |
 | `chr_str`       | Replace `CHR$(n)` with a string constant containing the character. Not done in string comparisons (see below). |
 
-With `-l`, only `const_fold`, `cmp_zero` and `defaults` are applied, as the
-other optimizations make the listing less readable.
+For de-obfuscating, there is one more optimization, only for the long listing
+and only enabled explicitly with `-O +fixed_vars`:
+
+| Name         | Effect |
+|--------------|--------|
+| `fixed_vars` | The reverse of `const_replace`: variables assigned only once, with a number or a string, at the start of the program, are replaced by the value. The assignment is replaced by a comment like `' fbp: fixed B = 53248`. Not done if the assignment is inside a loop, condition or PROC, if a PROC is called before it, or if the program uses `CLR`. |
+
+With `-l`, only `const_fold`, `cmp_zero`, `defaults`, `elif` and
+`fixed_vars` are applied, as the other optimizations make the listing less
+readable. The `elif` conversion is done by default in the long listing (use
+`-O -elif` to disable it), but only when no comment would be lost.
+
+For example, `fbp -l -O +fixed_vars` on this minimized code:
+
+```
+B=53248:C=704:POKE C+1,15:F.I=0T.3:P.B+I,I*16:N.:I.B=1:?1:EL.:I.C:?2:E.:E.
+```
+
+gives:
+
+```
+' fbp: fixed B = 53248
+' fbp: fixed C = 704
+poke 704 + 1, 15
+for I = 0 to 3
+  poke 53248 + I, I * 16
+next I
+if 53248 = 1
+  print 1
+elif 704
+  print 2
+endif
+```
 
 
 ## FastBasic notes for sizecoders

@@ -1,0 +1,37 @@
+FOR i = 0 TO 5
+  IF i = 0
+    PRINT "zero"
+  ELIF i = 1
+    PRINT "one"
+  ELIF i = 2
+    PRINT "two"
+  ELSE
+    PRINT "many"
+  ENDIF
+  IF i > 3
+    PRINT "big"
+  ELIF i = 3
+    PRINT "three"
+  ENDIF
+NEXT i
+' Comments must be kept
+a = 1
+IF a = 0
+  PRINT "zero"
+ELSE ' not zero
+  IF a = 1
+    PRINT "one"
+  ENDIF
+ENDIF
+IF a = 0
+  PRINT "zero"
+ELIF a = 1 ' one?
+  PRINT "one"
+ENDIF ' end inner
+IF a = 0
+  PRINT "zero"
+ELSE
+  IF a = 1
+    PRINT "one"
+  ENDIF ' end inner
+ENDIF ' end outer
