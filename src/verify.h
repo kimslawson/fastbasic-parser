@@ -71,6 +71,17 @@ std::set<std::string> phantom_labels(const program &p);
 // Size in bytes of the bytecode
 int code_size(const code_map &code);
 
+// Constants replaced by variables: variable name -> value, the value is
+// "N" followed by the number or "S" followed by the string bytes.
+typedef std::map<std::string, std::string> const_vars;
+
+// Compares two code maps allowing substitutions done by the optimizations
+// that change the code: constants replaced by variables in "cand", and
+// CHR$(n) replaced by a constant string. Compares the raw code.
+bool code_equal_subst(const code_map &orig, const code_map &cand, const const_vars &cv);
+bool code_equal_subst(const std::vector<codew> &orig, const std::vector<codew> &cand,
+                      const const_vars &cv);
+
 class verifier
 {
     const grammar &g;
@@ -95,6 +106,11 @@ class verifier
     // original statements [first, last).
     bool check(size_t first, size_t last, const std::vector<std::string> &texts,
                verify_mode mode) const;
+    // Checks that "after" is equivalent to "before", both parsed from the
+    // state before statement "first" with the given constant variables
+    // already defined.
+    bool check_subst(size_t first, const std::string &before, const std::string &after,
+                     const const_vars &cv) const;
     // Parses one statement text from a given state, returns false on error.
     bool parse(const engine_state &start, const std::string &text, engine_state &end,
                code_map &code, std::vector<token> *toks = nullptr,

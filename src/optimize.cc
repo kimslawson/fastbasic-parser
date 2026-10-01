@@ -27,6 +27,9 @@ static const opt_info opts[OPT_COUNT] = {
     {"print_sep", true, true,
      "Remove ';' separators in PRINT when not needed: '? \"A=\";A' becomes\n"
      "'?\"A=\"A'."},
+    {"print_join", true, true,
+     "Join constant strings and CHR$ in PRINT: '? \"A\";CHR$(66)' becomes\n"
+     "'?\"AB\"', the FastBasic optimizer does the same in the compiled code."},
     {"next_var", true, true,
      "Remove the variable name after NEXT, FastBasic does not use it."},
     {"defaults", true, true,
@@ -46,6 +49,10 @@ static const opt_info opts[OPT_COUNT] = {
      "Replace numeric constants used many times with a new variable, this\n"
      "makes the listing shorter but the compiled code a little bigger and\n"
      "slower. Only applies to the short listing."},
+    {"chr_str", false, true,
+     "Replace 'CHR$(n)' with a string containing the character, this makes\n"
+     "the listing shorter but the compiled code a little bigger. Only\n"
+     "applies to the short listing."},
 };
 
 const opt_info &opt_get(int id)

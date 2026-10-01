@@ -51,6 +51,10 @@ struct list_stats
     int max_len = 0;
     int long_stmts = 0; // statements longer than max line length
     name_map names;     // Renamed symbols, new -> original
+    // Used when applying optimizations that change the code:
+    std::string pre_text;  // Listing before the transformations
+    ::const_vars cvars;    // Constants replaced by variables
+    int init_stmts = 0;    // Number of statements added at the start
 };
 
 //---------------------------------------------------------------------

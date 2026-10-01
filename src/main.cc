@@ -115,6 +115,34 @@ static bool same_file(const std::string &a, const std::string &b)
     return std::filesystem::equivalent(a, b, ec);
 }
 
+// Verifies the output, returns an error message on failure
+static std::string verify_output(const grammar &g, const program &p,
+                                 const std::string &in, const std::string &text,
+                                 const list_stats &st, bool optimized)
+{
+    // If optimizations that change the code were applied, verify the text
+    // before those against the original, and the output against that text
+    // allowing only the substitutions done.
+    bool subst = !st.pre_text.empty();
+    program q;
+    auto err = q.parse_text(g, subst ? st.pre_text : text, in, false);
+    if(!err.empty())
+        return "the output can't be parsed:\n" + err;
+    if(!code_equal(p.full_code(optimized), q.full_code(optimized), st.names))
+        return "the output does not produce the same code.";
+    if(subst)
+    {
+        program r;
+        err = r.parse_text(g, text, in, false);
+        if(!err.empty())
+            return "the output can't be parsed:\n" + err;
+        if(!code_equal_subst(q.full_code(false), r.full_code(false, st.init_stmts),
+                             st.cvars))
+            return "the output does not produce equivalent code.";
+    }
+    return std::string();
+}
+
 enum class out_type
 {
     longlist,
@@ -314,22 +342,16 @@ int main(int argc, char **argv)
 
         // Verify the complete output
         bool optimized = mode == out_type::shortlist && opts.any();
-        program q;
-        auto err = q.parse_text(g, text, in, false);
-        if(!err.empty())
+        auto verify_err = verify_output(g, p, in, text, st, optimized);
+        if(!verify_err.empty())
         {
-            std::cerr << in << ": internal error, the output can't be parsed:\n" << err;
-            all_ok = false;
-        }
-        else if(!code_equal(p.full_code(optimized), q.full_code(optimized), st.names))
-        {
-            std::cerr << in << ": internal error, the output does not produce the "
-                             "same code.\n";
+            std::cerr << in << ": internal error, " << verify_err << "\n";
             all_ok = false;
         }
         else if(verbose > 1)
             std::cerr << in << ": verified, the output compiles to the same code"
-                      << (optimized ? " (after the FastBasic optimizer).\n" : ".\n");
+                      << (optimized ? " (after the FastBasic optimizer)" : "")
+                      << (st.cvars.empty() ? ".\n" : ", with constants replaced.\n");
 
         // Write the output
         if(outname == "-")

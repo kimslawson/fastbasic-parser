@@ -27,6 +27,7 @@ enum opt_id
     // Rewrites that produce the same compiled code, enabled by "-O"
     OPT_PARENS,
     OPT_PRINT_SEP,
+    OPT_PRINT_JOIN,
     OPT_NEXT_VAR,
     OPT_DEFAULTS,
     OPT_CONST_FOLD,
@@ -36,6 +37,7 @@ enum opt_id
     OPT_END,
     // Trade-offs, only enabled explicitly or by "-S"
     OPT_CONST_REPLACE,
+    OPT_CHR_STR,
     OPT_COUNT
 };
 

@@ -64,11 +64,14 @@ for f in *.bas; do
             tgt=atari-int
         fi
     fi
-    for mode in l s sO S; do
+    for mode in l s sO SX S; do
         case $mode in
             l)  opt="-l";    fbopt="-n" ;;
             s)  opt="-s";    fbopt="-n" ;;
             sO) opt="-s -O"; fbopt="" ;;
+            # Without the optimizations that change the code
+            SX) opt="-S -O -const_replace -O -chr_str"; fbopt="" ;;
+            # With all optimizations, only checks that it compiles
             S)  opt="-S";    fbopt="" ;;
         esac
         total=$((total + 1))
@@ -85,6 +88,9 @@ for f in *.bas; do
             echo "FAIL (output does not compile): $f [$opt]"
             cat "$b.err"
             fail=$((fail + 1))
+            continue
+        fi
+        if [ $mode = S ]; then
             continue
         fi
         normalize "$b.asm" > "$b.orig.n"

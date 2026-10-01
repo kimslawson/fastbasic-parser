@@ -48,6 +48,8 @@ struct statement
     bool has_comment() const;
     // True if the statement starts a new code block (PROC / DATA)
     bool starts_block() const;
+    // Names of the code blocks started in this statement
+    std::vector<std::string> new_blocks() const;
 };
 
 class program
@@ -72,8 +74,9 @@ class program
     }
 
     // Returns the full code of the program, as the FastBasic compiler would
-    // produce, optionally running the peephole optimizer.
-    std::vector<codew> full_code(bool optimize) const;
+    // produce, optionally running the peephole optimizer. The first "skip"
+    // statements are not included.
+    std::vector<codew> full_code(bool optimize, size_t skip = 0) const;
 };
 
 // Reads a complete source line, from FastBasic "compile.cc"

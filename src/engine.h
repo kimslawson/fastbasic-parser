@@ -84,6 +84,8 @@ struct token
     int value = 0;
     // num: parsed as a byte. asmsym: byte symbol ("@@").
     bool byte = false;
+    // var: name added by fbp, must not be renamed
+    bool fixed = false;
     // fpnum: the value
     atari_fp fp;
     // str/datafile: the string bytes

@@ -40,15 +40,21 @@ bool statement::has_comment() const
     return !toks.empty() && toks.back().kind == tk::rem;
 }
 
-bool statement::starts_block() const
+std::vector<std::string> statement::new_blocks() const
 {
     // A new code block is created by PROC, DATA and DLI SET, the code
     // blocks are sorted by source line in the compiled program.
+    std::vector<std::string> ret;
     auto cur = before.proc_stack.empty() ? std::string() : before.proc_stack.back();
     for(auto &c : code)
         if(c.first != cur && !c.first.empty() && !c.second.empty())
-            return true;
-    return false;
+            ret.push_back(c.first);
+    return ret;
+}
+
+bool statement::starts_block() const
+{
+    return !new_blocks().empty();
 }
 
 // Reads a complete source line, respecting ATASCII and ASCII EOL only
@@ -216,11 +222,11 @@ bool program::parse_file(const grammar &g, const std::string &file_name)
     return true;
 }
 
-std::vector<codew> program::full_code(bool optimize) const
+std::vector<codew> program::full_code(bool optimize, size_t skip) const
 {
     code_map all;
-    for(auto &st : stmts)
-        for(auto &c : st.code)
+    for(size_t i = skip; i < stmts.size(); i++)
+        for(auto &c : stmts[i].code)
         {
             auto &v = all[c.first];
             v.insert(v.end(), c.second.begin(), c.second.end());

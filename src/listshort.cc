@@ -34,7 +34,9 @@
 #include "optimize.h"
 #include "rename.h"
 #include <algorithm>
+#include <functional>
 #include <iostream>
+#include <sstream>
 
 namespace
 {
@@ -55,6 +57,8 @@ struct piece
     const token *t;
     std::vector<std::string> alts;
     size_t choice = 0;
+    // The alternative that is always valid (original form)
+    size_t safe = 0;
     const std::string &text() const { return alts[choice]; }
 };
 
@@ -335,6 +339,7 @@ class short_writer
                     if(a != f)
                         pc.alts.push_back(f);
                 }
+                pc.safe = pc.alts.size() - 1;
                 break;
             case tk::punct:
                 pc.alts = {t.lit};
@@ -342,7 +347,7 @@ class short_writer
             case tk::var:
             {
                 auto i = ren.vars.find(t.lit);
-                pc.alts = {i == ren.vars.end() ? t.lit : i->second};
+                pc.alts = {(i == ren.vars.end() || t.fixed) ? t.lit : i->second};
                 break;
             }
             case tk::label:
@@ -353,8 +358,14 @@ class short_writer
             }
             case tk::num:
             case tk::fpnum:
+            {
                 pc.alts = num_short(t);
+                auto src = ucase(t.src);
+                for(size_t i = 0; i < pc.alts.size(); i++)
+                    if(pc.alts[i] == src)
+                        pc.safe = i;
                 break;
+            }
             case tk::str:
             case tk::datafile:
                 pc.alts = {str_short(t.str)};
@@ -467,18 +478,28 @@ class short_writer
         return ver.check(first, last, {txt}, mode);
     }
 
-    // Renders the tokens to the shortest text that produces the same code as
-    // the original statements [first,last). If "full" is false, only tries
-    // adding spaces to fix the output.
+    typedef std::function<bool(const std::string &)> checker;
+
     bool render(const std::vector<token> &toks, size_t first, size_t last,
                 std::string &result, bool full) const
+    {
+        return render(
+            toks, [&](const std::string &t) { return check(first, last, t); }, result,
+            full);
+    }
+
+    // Renders the tokens to the shortest text that is valid according to the
+    // checker function. If "full" is false, only tries adding spaces to fix
+    // the output.
+    bool render(const std::vector<token> &toks, const checker &chk, std::string &result,
+                bool full) const
     {
         auto pc = make_pieces(toks);
         size_t n = pc.size();
         std::vector<bool> force(n, false);
 
         auto txt = join(pc, force);
-        if(check(first, last, txt))
+        if(chk(txt))
         {
             result = txt;
             return true;
@@ -487,26 +508,28 @@ class short_writer
         for(size_t i = 1; i < n; i++)
             force[i] = risky(pc[i - 1], pc[i]);
         txt = join(pc, force);
-        if(!check(first, last, txt))
+        if(!chk(txt))
         {
             if(!full)
                 return false;
-            // Use the longest form of all tokens
+            // Use the safe form of all tokens
             for(auto &x : pc)
-                x.choice = x.alts.size() - 1;
+                x.choice = x.safe;
             for(size_t i = 1; i < n; i++)
                 force[i] = force[i] || risky(pc[i - 1], pc[i]);
             txt = join(pc, force);
-            if(!check(first, last, txt))
+            if(!chk(txt))
                 return false;
             // Try to shorten each token
             for(auto &x : pc)
             {
                 auto old = x.choice;
-                for(size_t c = 0; c < old; c++)
+                for(size_t c = 0; c < x.alts.size(); c++)
                 {
+                    if(x.alts[c].size() >= x.alts[old].size())
+                        continue;
                     x.choice = c;
-                    if(check(first, last, join(pc, force)))
+                    if(chk(join(pc, force)))
                         break;
                     x.choice = old;
                 }
@@ -518,7 +541,7 @@ class short_writer
             if(!force[i])
                 continue;
             force[i] = false;
-            if(!check(first, last, join(pc, force)))
+            if(!chk(join(pc, force)))
                 force[i] = true;
         }
         result = join(pc, force);
@@ -526,13 +549,15 @@ class short_writer
     }
 
     // Tries to replace the tokens of the statement, returns true if valid.
-    bool try_toks(ostmt &s, std::vector<token> cand) const
+    // If "allow_longer" is true, accepts a longer text (used for steps that
+    // allow a further reduction).
+    bool try_toks(ostmt &s, std::vector<token> cand, bool allow_longer = false) const
     {
         std::string txt;
         if(!render(cand, s.first, s.last, txt, false))
             return false;
         // Only accept if not longer
-        if(txt.size() > s.text.size())
+        if(txt.size() > s.text.size() + (allow_longer ? 2 : 0))
             return false;
         s.toks = std::move(cand);
         s.text = txt;
@@ -722,6 +747,58 @@ class short_writer
         }
     }
 
+    // Joins constant strings in PRINT
+    void opt_print_join(ostmt &s) const
+    {
+        if(s.toks.empty() || !(is_punct(s.toks[0], "?") || is_kw(s.toks[0], "PRInt")))
+            return;
+        bool changed = true;
+        while(changed)
+        {
+            changed = false;
+            auto &t = s.toks;
+            for(size_t i = 0; i < t.size() && !changed; i++)
+            {
+                // CHR$(n) to string
+                if(is_kw(t[i], "CHR$") && i + 1 < t.size())
+                {
+                    size_t e = 0, n = 0;
+                    if(t[i + 1].kind == tk::num)
+                        n = i + 1, e = i + 2;
+                    else if(i + 3 < t.size() && is_punct(t[i + 1], "(") &&
+                            t[i + 2].kind == tk::num && is_punct(t[i + 3], ")"))
+                        n = i + 2, e = i + 4;
+                    if(e && t[n].value < 256)
+                    {
+                        token st = make_tok(tk::str, std::string(), "STRING_FUNCTIONS");
+                        st.str = std::string(1, char(t[n].value));
+                        auto c = t;
+                        c.erase(c.begin() + i + 1, c.begin() + e);
+                        c[i] = st;
+                        changed = try_toks(s, c, true);
+                    }
+                }
+                // Two strings
+                else if(t[i].kind == tk::str && t[i].table == "STRING_FUNCTIONS")
+                {
+                    size_t j = i + 1;
+                    if(j < t.size() && is_punct(t[j], ";"))
+                        j++;
+                    if(j < t.size() && t[j].kind == tk::str &&
+                       t[j].table == "STRING_FUNCTIONS" &&
+                       t[i].str.size() + t[j].str.size() < 256 &&
+                       (j + 1 >= t.size() || !is_punct(t[j + 1], "[")))
+                    {
+                        auto c = t;
+                        c[i].str += c[j].str;
+                        c.erase(c.begin() + i + 1, c.begin() + j + 1);
+                        changed = try_toks(s, c, true);
+                    }
+                }
+            }
+        }
+    }
+
     void opt_parens(ostmt &s) const
     {
         for(size_t i = 0; i < s.toks.size(); i++)
@@ -784,29 +861,239 @@ class short_writer
         }
     }
 
-    // Removes END at the end of the program
+    // Removes END at the end of the main program, the compiler adds an END
+    // after the last statement. Code after it can only be PROC / DATA.
     void opt_end()
     {
-        if(out.empty())
+        auto main_code = [&](const ostmt &s)
+        {
+            for(size_t i = s.first; i < s.last; i++)
+            {
+                auto c = p.stmts[i].code.find(std::string());
+                if(c != p.stmts[i].code.end() && !c->second.empty())
+                    return true;
+            }
+            return false;
+        };
+        for(size_t k = out.size(); k-- > 0;)
+        {
+            auto &s = out[k];
+            if(!main_code(s))
+                continue;
+            if(s.toks.size() == 1 && is_kw(s.toks[0], "END") &&
+               p.stmts[s.first].before.proc_stack.empty())
+                out.erase(out.begin() + k);
             return;
-        auto &s = out.back();
-        if(s.toks.size() != 1 || !is_kw(s.toks[0], "END") ||
-           !p.final_state.proc_stack.empty())
-            return;
-        // Check that the END is in the main program
-        code_map code;
-        for(size_t i = s.first; i < s.last; i++)
-            for(auto &x : p.stmts[i].code)
-                code[x.first].insert(code[x.first].end(), x.second.begin(),
-                                     x.second.end());
-        if(code.size() != 1 || !code.count(std::string()) ||
-           code[std::string()].size() != 1)
-            return;
-        out.pop_back();
+        }
+    }
+
+    //-----------------------------------------------------------------
+    // Transformations that change the compiled code. These are verified
+    // against the text before the transformation, allowing only the
+    // substitutions done.
+
+    bool check_subst(const ostmt &s, const std::string &txt) const
+    {
+        return ver.check_subst(s.first, s.text, txt, cvars);
+    }
+
+    // Returns true if the token at "i" is the argument of ADR
+    static bool in_adr(const std::vector<token> &t, size_t i)
+    {
+        return i > 0 && ((is_punct(t[i - 1], "&") && t[i - 1].table == "INT_FUNCTIONS") ||
+                         is_kw(t[i - 1], "ADR("));
+    }
+
+    // CHR$(n) to a constant string
+    void opt_chr_str(ostmt &s) const
+    {
+        // CHR$ returns the string in a shared buffer, so comparing two CHR$
+        // results is always true; don't touch statements with string
+        // comparisons.
+        for(auto &t : s.toks)
+            if(t.table == "COMP_STR_RIGHT")
+                return;
+        for(size_t i = 0; i + 1 < s.toks.size(); i++)
+        {
+            if(!is_kw(s.toks[i], "CHR$") || in_adr(s.toks, i))
+                continue;
+            size_t e = 0, n = 0;
+            if(s.toks[i + 1].kind == tk::num)
+                n = i + 1, e = i + 2;
+            else if(i + 3 < s.toks.size() && is_punct(s.toks[i + 1], "(") &&
+                    s.toks[i + 2].kind == tk::num && is_punct(s.toks[i + 3], ")"))
+                n = i + 2, e = i + 4;
+            else
+                continue;
+            if(s.toks[n].value > 255)
+                continue;
+            token t = make_tok(tk::str, std::string(), "STRING_FUNCTIONS");
+            t.str = std::string(1, char(s.toks[n].value));
+            auto c = s.toks;
+            c.erase(c.begin() + i + 1, c.begin() + e);
+            c[i] = t;
+            std::string txt;
+            if(render(c, [&](const std::string &x) { return check_subst(s, x); }, txt,
+                      false) &&
+               txt.size() < s.text.size())
+            {
+                s.toks = c;
+                s.text = txt;
+            }
+        }
+    }
+
+    // Replaces repeated constants with variables
+    void opt_const_replace()
+    {
+        // CLR clears all variables, so this is not possible
+        for(auto &s : out)
+            for(auto &t : s.toks)
+                if(is_kw(t, "CLR"))
+                {
+                    if(opt.verbose > 1)
+                        std::cerr << p.fname << ": note, not replacing constants as "
+                                                "the program uses CLR.\n";
+                    return;
+                }
+        struct cinfo
+        {
+            std::string key, text;
+            int count = 0;
+            const token *tok = nullptr;
+        };
+        auto key_of = [](const token &t)
+        {
+            if(t.kind == tk::num && t.table == "T_EXPR")
+                return "N" + std::to_string(t.value & 0xFFFF);
+            if(t.kind == tk::str && t.table == "STRING_FUNCTIONS")
+                return "S" + t.str;
+            return std::string();
+        };
+        std::map<std::string, cinfo> cmap;
+        std::set<std::string> excluded;
+        for(auto &s : out)
+            for(size_t i = 0; i < s.toks.size(); i++)
+            {
+                auto &t = s.toks[i];
+                auto k = key_of(t);
+                if(k.empty())
+                    continue;
+                // Strings used as addresses (for example, machine code)
+                if(k[0] == 'S' && in_adr(s.toks, i))
+                {
+                    excluded.insert(k);
+                    continue;
+                }
+                auto &c = cmap[k];
+                c.key = k;
+                c.count++;
+                c.tok = &t;
+                c.text = t.kind == tk::num ? num_short(t)[0] : str_short(t.str);
+            }
+        // Sort by estimated savings with a one letter variable
+        std::vector<cinfo> cands;
+        auto saving = [](const cinfo &c)
+        {
+            int n = c.key[0] == 'S' ? 2 : 1;
+            int l = c.text.size();
+            return c.count * (l - n) - (n + l + 2);
+        };
+        for(auto &c : cmap)
+            if(saving(c.second) > 0 && !excluded.count(c.first))
+                cands.push_back(c.second);
+        std::stable_sort(cands.begin(), cands.end(),
+                         [&](const cinfo &a, const cinfo &b)
+                         { return saving(a) > saving(b); });
+
+        std::set<std::string> used;
+        for(auto &x : ren.symbols)
+            if(!x.is_proc)
+                used.insert(x.new_name);
+        for(auto &c : cands)
+        {
+            // Get a new one letter variable name
+            std::string name;
+            for(int i = 0; i < 27 && name.empty(); i++)
+                if(!used.count(short_name(i)))
+                    name = short_name(i);
+            if(name.empty())
+                break;
+            bool is_str = c.key[0] == 'S';
+            auto init = name + (is_str ? "$=" : "=") + c.text;
+            // Try replacing in all statements
+            auto save_out = out;
+            cvars[name] = c.key;
+            int delta = init.size() + 1;
+            for(auto &s : out)
+            {
+                std::vector<token> nt;
+                bool changed = false;
+                for(auto &t : s.toks)
+                {
+                    if(key_of(t) == c.key)
+                    {
+                        auto v = make_tok(tk::var, name, is_str ? "STRING_FUNCTIONS"
+                                                                : "INT_FUNCTIONS");
+                        v.value = is_str ? VT_STRING : VT_WORD;
+                        v.fixed = true;
+                        nt.push_back(v);
+                        if(is_str)
+                            nt.push_back(make_tok(tk::punct, "$", "STRING_FUNCTIONS"));
+                        changed = true;
+                    }
+                    else
+                        nt.push_back(t);
+                }
+                if(!changed)
+                    continue;
+                std::string txt;
+                if(render(nt, [&](const std::string &x) { return check_subst(s, x); },
+                          txt, false))
+                {
+                    delta += int(txt.size()) - int(s.text.size());
+                    s.toks = nt;
+                    s.text = txt;
+                }
+            }
+            if(delta < 0)
+            {
+                used.insert(name);
+                init_stmts.push_back(init);
+                if(opt.verbose > 1)
+                    std::cerr << p.fname << ": replaced constant " << c.text << " ("
+                              << c.count << " uses) with variable " << name
+                              << (is_str ? "$" : "") << ", " << -delta
+                              << " bytes shorter.\n";
+            }
+            else
+            {
+                if(opt.verbose > 2)
+                    std::cerr << p.fname << ": not replacing constant " << c.text << " ("
+                              << c.count << " uses), " << delta << " bytes longer.\n";
+                out = save_out;
+                cvars.erase(name);
+            }
+        }
     }
 
   public:
-    std::vector<std::string> notes;
+    bool phase2_enabled() const { return O[OPT_CONST_REPLACE] || O[OPT_CHR_STR]; }
+
+    void build2()
+    {
+        if(O[OPT_CHR_STR])
+            for(auto &s : out)
+                opt_chr_str(s);
+        if(O[OPT_CONST_REPLACE])
+            opt_const_replace();
+    }
+
+  public:
+    // Statements added at the start of the program
+    std::vector<std::string> init_stmts;
+    // Constants replaced by variables
+    const_vars cvars;
 
     short_writer(const grammar &g, const program &p, const list_options &opt)
         : g(g), p(p), opt(opt), ren(p), ver(g, p, &nm), kwset(grammar_keywords(g))
@@ -899,6 +1186,8 @@ class short_writer
                 opt_defaults(s);
             if(O[OPT_NEXT_VAR])
                 opt_next_var(s);
+            if(O[OPT_PRINT_JOIN])
+                opt_print_join(s);
             if(O[OPT_PRINT_SEP])
                 opt_print_sep(s);
             if(O[OPT_PARENS])
@@ -911,8 +1200,9 @@ class short_writer
         return true;
     }
 
-    void write(std::ostream &os, list_stats &stats) const
+    std::string pack(list_stats &stats) const
     {
+        std::ostringstream os;
         const char *eol = opt.ascii_eol ? "\n" : "\x9b";
         std::string line;
         auto flush = [&]()
@@ -925,10 +1215,42 @@ class short_writer
             stats.max_len = std::max<int>(stats.max_len, line.size());
             line.clear();
         };
-        // Source line of the code block started in the current line, the
-        // FastBasic compiler sorts code blocks by line, so two blocks can't
-        // be in the same line unless they were in the original.
-        int block_line = -1;
+        // The FastBasic compiler places the code blocks (PROC / DATA / DLI)
+        // sorted by source line, and blocks in the same line sorted by the
+        // internal label name. Two blocks can be in the same output line only
+        // if this gives the same order as in the original program. With more
+        // than 16 blocks the sort is not stable, so only keep blocks in the
+        // same line if they were in the same line in the original.
+        struct blk
+        {
+            std::string label;
+            int line;
+        };
+        size_t nblocks = 0;
+        for(auto &st : p.stmts)
+            nblocks += st.new_blocks().size();
+        std::vector<blk> line_blocks;
+        auto blocks_ok = [&](const std::vector<blk> &nb)
+        {
+            for(auto &a : line_blocks)
+                for(auto &b : nb)
+                    if(a.line != b.line &&
+                       (nblocks > 16 || a.line > b.line || !(a.label < b.label)))
+                        return false;
+            return true;
+        };
+        for(auto &i : init_stmts)
+        {
+            if(line.empty())
+                line = i;
+            else if(int(line.size() + 1 + i.size()) <= opt.max_line)
+                line += ":" + i;
+            else
+            {
+                flush();
+                line = i;
+            }
+        }
         for(auto &s : out)
         {
             if(s.text.empty())
@@ -941,25 +1263,25 @@ class short_writer
                               << ": warning, statement longer than line length ("
                               << s.text.size() << " > " << opt.max_line << ").\n";
             }
-            int blk = -1;
+            std::vector<blk> nb;
             for(size_t i = s.first; i < s.last; i++)
-                if(p.stmts[i].starts_block())
-                    blk = p.stmts[i].line;
+                for(auto &l : p.stmts[i].new_blocks())
+                    nb.push_back(blk{l, p.stmts[i].line});
             if(line.empty())
                 line = s.text;
             else if(int(line.size() + 1 + s.text.size()) <= opt.max_line &&
-                    (blk < 0 || block_line < 0 || blk == block_line))
+                    blocks_ok(nb))
                 line += ":" + s.text;
             else
             {
                 flush();
-                block_line = -1;
+                line_blocks.clear();
                 line = s.text;
             }
-            if(blk >= 0)
-                block_line = blk;
+            line_blocks.insert(line_blocks.end(), nb.begin(), nb.end());
         }
         flush();
+        return os.str();
     }
 };
 } // namespace
@@ -970,7 +1292,15 @@ bool list_short(std::ostream &out, const grammar &g, const program &p,
     short_writer w(g, p, opt);
     if(!w.build())
         return false;
-    w.write(out, stats);
+    if(w.phase2_enabled())
+    {
+        list_stats pre;
+        stats.pre_text = w.pack(pre);
+        w.build2();
+        stats.cvars = w.cvars;
+        stats.init_stmts = w.init_stmts.size();
+    }
+    out << w.pack(stats);
     stats.names = w.map();
     if(opt.verbose > 1)
     {

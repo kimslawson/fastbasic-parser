@@ -336,3 +336,111 @@ bool verifier::check(size_t first, size_t last, const std::vector<std::string> &
     }
     return true;
 }
+
+// Returns the name of a variable code word
+static std::string var_name(codew c)
+{
+    auto s = c.to_asm();
+    auto b = s.find('"'), e = s.rfind('"');
+    if(b != s.npos && e > b)
+        return s.substr(b + 1, e - b - 1);
+    return std::string();
+}
+
+bool code_equal_subst(const std::vector<codew> &a, const std::vector<codew> &b,
+                      const const_vars &cv)
+{
+    static const name_map empty;
+    size_t i = 0, j = 0;
+    while(i < a.size() && j < b.size())
+    {
+        // Variable instead of constant
+        if(b[j].is_tok("TOK_VAR_LOAD") && j + 1 < b.size() && b[j + 1].is_varn() &&
+           i + 1 < a.size())
+        {
+            auto it = cv.find(var_name(b[j + 1]));
+            if(it != cv.end())
+            {
+                auto x = a[i], y = a[i + 1];
+                std::string val;
+                size_t len = 2;
+                if((x.is_tok("TOK_BYTE") && y.is_byte()) ||
+                   (x.is_tok("TOK_NUM") && y.is_word()))
+                {
+                    val = "N" + std::to_string(y.get_val() & 0xFFFF);
+                    // A CHR$(n) replaced by a string variable
+                    if(i + 2 < a.size() && a[i + 2].is_tok("TOK_CHR"))
+                    {
+                        val = "S" + std::string(1, char(y.get_val() & 0xFF));
+                        len = 3;
+                    }
+                }
+                else if(x.is_tok("TOK_CSTRING") && y.is_string())
+                    val = "S" + y.get_str();
+                if(val != it->second)
+                    return false;
+                i += len;
+                j += 2;
+                continue;
+            }
+        }
+        // Constant string instead of CHR$
+        if(b[j].is_tok("TOK_CSTRING") && j + 1 < b.size() && b[j + 1].is_string() &&
+           i + 2 < a.size() && a[i + 2].is_tok("TOK_CHR"))
+        {
+            auto x = a[i], y = a[i + 1], z = b[j + 1];
+            auto str = z.get_str();
+            if(((x.is_tok("TOK_BYTE") && y.is_byte()) ||
+                (x.is_tok("TOK_NUM") && y.is_word())) &&
+               str.size() == 1 && (y.get_val() & 0xFF) == (str[0] & 0xFF))
+            {
+                i += 3;
+                j += 2;
+                continue;
+            }
+        }
+        if(normalize(a[i], empty) != normalize(b[j], empty))
+            return false;
+        i++;
+        j++;
+    }
+    return i == a.size() && j == b.size();
+}
+
+bool code_equal_subst(const code_map &orig, const code_map &cand, const const_vars &cv)
+{
+    code_map o, c;
+    for(auto &x : orig)
+        if(!x.second.empty())
+            o[x.first] = x.second;
+    for(auto &x : cand)
+        if(!x.second.empty())
+            c[x.first] = x.second;
+    if(o.size() != c.size())
+        return false;
+    for(auto &x : o)
+    {
+        auto i = c.find(x.first);
+        if(i == c.end() || !code_equal_subst(x.second, i->second, cv))
+            return false;
+    }
+    return true;
+}
+
+bool verifier::check_subst(size_t first, const std::string &before,
+                           const std::string &after, const const_vars &cv) const
+{
+    static const name_map empty;
+    const name_map &m = names ? *names : empty;
+    engine_state st = m.translate(p.stmts[first].before, phantoms, phantom_lbls);
+    for(auto &v : cv)
+        st.vars[v.first] =
+            256 * st.vars.size() + (v.second[0] == 'S' ? VT_STRING : VT_WORD);
+    engine_state ea, eb;
+    code_map ca, cb;
+    if(debug)
+        std::cerr << "  subst: [" << before << "] -> [" << after << "]\n";
+    if(!parse(st, before, ea, ca) || !parse(st, after, eb, cb))
+        return false;
+    return state_equal(ea, eb, empty) && code_equal_subst(ca, cb, cv);
+}

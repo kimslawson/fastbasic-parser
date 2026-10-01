@@ -285,10 +285,10 @@ static std::vector<std::string> fp_short(const token &t)
                          bool db = b.find_first_of(".E") != b.npos;
                          return da && !db;
                      });
-    // The original text is always valid, keep it last
+    // The original text is always valid
     auto src = ucase(t.src);
-    cand.erase(std::remove(cand.begin(), cand.end(), src), cand.end());
-    cand.push_back(src);
+    if(std::find(cand.begin(), cand.end(), src) == cand.end())
+        cand.push_back(src);
     return cand;
 }
 
