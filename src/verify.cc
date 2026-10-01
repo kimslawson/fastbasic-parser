@@ -347,6 +347,86 @@ static std::string var_name(codew c)
     return std::string();
 }
 
+// Returns the length of a "load number 1" sequence at a[i], or 0
+static size_t is_one(const std::vector<codew> &a, size_t i)
+{
+    if(i + 1 >= a.size())
+        return 0;
+    auto x = a[i], y = a[i + 1];
+    if(((x.is_tok("TOK_BYTE") && y.is_byte()) || (x.is_tok("TOK_NUM") && y.is_word())) &&
+       (y.get_val() & 0xFFFF) == 1)
+        return 2;
+    return 0;
+}
+
+static bool same_word(const codew &x, const codew &y)
+{
+    static const name_map empty;
+    return normalize(x, empty) == normalize(y, empty);
+}
+
+// Checks for "X=X+1" in a[i] replaced by "INC X" in b[j], returns the
+// length of the matched sequence in "a", or 0.
+static size_t inc_var(const std::vector<codew> &a, size_t i, const std::vector<codew> &b,
+                      size_t j)
+{
+    if(j + 2 >= b.size() || !b[j].is_tok("TOK_VAR_SADDR") ||
+       !(b[j + 2].is_tok("TOK_INC") || b[j + 2].is_tok("TOK_DEC")))
+        return 0;
+    bool inc = b[j + 2].is_tok("TOK_INC");
+    auto op = inc ? "TOK_ADD" : "TOK_SUB";
+    auto &v = b[j + 1];
+    // X = X + 1
+    if(i + 1 < a.size() && a[i].is_tok("TOK_VAR_LOAD") && same_word(a[i + 1], v) &&
+       i + 2 < a.size() && a[i + 2].is_tok("TOK_PUSH"))
+    {
+        auto n = is_one(a, i + 3);
+        if(n && i + n + 5 < a.size() && a[i + n + 3].is_tok(op) &&
+           a[i + n + 4].is_tok("TOK_VAR_STORE") && same_word(a[i + n + 5], v))
+            return n + 6;
+    }
+    // X = 1 + X
+    auto n = is_one(a, i);
+    if(inc && n && i + n + 4 < a.size() && a[i + n].is_tok("TOK_PUSH") &&
+       a[i + n + 1].is_tok("TOK_VAR_LOAD") && same_word(a[i + n + 2], v) &&
+       a[i + n + 3].is_tok("TOK_ADD") && a[i + n + 4].is_tok("TOK_VAR_STORE") &&
+       i + n + 5 < a.size() && same_word(a[i + n + 5], v))
+        return n + 6;
+    return 0;
+}
+
+// Checks for "A(I)=A(I)+1" replaced by "INC A(I)", at the point where both
+// codes have the address of the element followed by TOK_SADDR. Returns the
+// length of the matched sequence in "a", or 0.
+static size_t inc_array(const std::vector<codew> &a, size_t i, const std::vector<codew> &b,
+                        size_t j)
+{
+    if(j + 1 >= b.size() || !b[j].is_tok("TOK_SADDR") ||
+       !(b[j + 1].is_tok("TOK_INC") || b[j + 1].is_tok("TOK_DEC")) ||
+       !a[i].is_tok("TOK_SADDR"))
+        return 0;
+    auto op = b[j + 1].is_tok("TOK_INC") ? "TOK_ADD" : "TOK_SUB";
+    // The address calculation, already matched, is repeated after TOK_SADDR
+    for(size_t l = 1; l <= i && l <= j; l++)
+    {
+        size_t k = i + 1;
+        bool ok = k + l <= a.size();
+        for(size_t m = 0; ok && m < l; m++)
+            ok = same_word(a[k + m], a[i - l + m]) && same_word(a[i - l + m], b[j - l + m]);
+        if(!ok)
+            continue;
+        k += l;
+        if(k + 1 < a.size() && a[k].is_tok("TOK_DPEEK") && a[k + 1].is_tok("TOK_PUSH"))
+        {
+            auto n = is_one(a, k + 2);
+            if(n && k + n + 3 < a.size() && a[k + n + 2].is_tok(op) &&
+               a[k + n + 3].is_tok("TOK_DPOKE"))
+                return k + n + 4 - i;
+        }
+    }
+    return 0;
+}
+
 bool code_equal_subst(const std::vector<codew> &a, const std::vector<codew> &b,
                       const const_vars &cv)
 {
@@ -354,6 +434,19 @@ bool code_equal_subst(const std::vector<codew> &a, const std::vector<codew> &b,
     size_t i = 0, j = 0;
     while(i < a.size() && j < b.size())
     {
+        // INC / DEC
+        if(auto n = inc_var(a, i, b, j))
+        {
+            i += n;
+            j += 3;
+            continue;
+        }
+        if(auto n = inc_array(a, i, b, j))
+        {
+            i += n;
+            j += 2;
+            continue;
+        }
         // Variable instead of constant
         if(b[j].is_tok("TOK_VAR_LOAD") && j + 1 < b.size() && b[j + 1].is_varn() &&
            i + 1 < a.size())

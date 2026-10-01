@@ -21,6 +21,7 @@
 
 #include "program.h"
 #include "verify.h"
+#include <map>
 #include <ostream>
 #include <set>
 #include <string>
@@ -101,6 +102,11 @@ std::set<std::string> grammar_keywords(const grammar &g);
 // Writes the long (readable) listing
 bool list_long(std::ostream &out, const grammar &g, const program &p,
                const list_options &opt, list_stats &stats);
+
+// Applies the optimizations useful for the long listing, returns the text
+// (in short form) of each modified statement.
+std::map<size_t, std::string> optimize_for_long(const grammar &g, const program &p,
+                                                const list_options &opt);
 
 // Writes the short (minimized) listing
 bool list_short(std::ostream &out, const grammar &g, const program &p,

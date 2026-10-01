@@ -1,0 +1,12 @@
+' Strings with special characters
+PRINT "Quote "" inside"
+PRINT "Line"$9B"break"
+PRINT "Score: "; 10; " "; CHR$(65); CHR$(66)
+A$ = "Hello"
+A$ =+ " World"
+PRINT A$[1, 5], LEN(A$)
+' CHR$ uses a shared buffer: this prints 1
+PRINT CHR$(65) = CHR$(66)
+PRINT "AB" = "AB", A$ = "Hello World"
+B$ = "Hello"
+PRINT B$, "Hello", "Hello", "Hello"

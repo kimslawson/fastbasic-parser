@@ -40,11 +40,13 @@ static const opt_info opts[OPT_COUNT] = {
      "becomes 'POKE 708,0'."},
     {"cmp_zero", true, true,
      "Remove comparisons with zero in conditions: 'IF X<>0' becomes 'IF X'."},
-    {"inc_dec", true, true,
-     "Replace 'X=X+1' with 'INC X' and 'X=X-1' with 'DEC X'."},
     {"if_then", true, true,
      "Replace IF / ENDIF blocks with only one statement with IF / THEN."},
     {"end", true, true, "Remove the END statement at the end of the program."},
+    {"inc_dec", false, true,
+     "Replace 'X=X+1' with 'INC X' and 'X=X-1' with 'DEC X', also on array\n"
+     "elements. The compiled code is smaller and faster, as the FastBasic\n"
+     "optimizer does not do this."},
     {"const_replace", false, true,
      "Replace numeric constants used many times with a new variable, this\n"
      "makes the listing shorter but the compiled code a little bigger and\n"
@@ -118,7 +120,7 @@ void opt_list(std::ostream &os)
             os << "\n";
         }
     os << "\nOptimizations that change the compiled code, enable with '-O +name'\n"
-          "(all are enabled with '-S'):\n\n";
+          "(all are enabled with '-S'), the result is verified to be equivalent:\n\n";
     for(int i = 0; i < OPT_COUNT; i++)
         if(!opts[i].same_code)
         {

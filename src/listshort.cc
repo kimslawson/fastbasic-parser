@@ -36,6 +36,7 @@
 #include <algorithm>
 #include <functional>
 #include <iostream>
+#include <map>
 #include <sstream>
 
 namespace
@@ -49,6 +50,8 @@ struct ostmt
     size_t first, last;
     // Rendered text
     std::string text;
+    // Tokens modified by an optimization
+    bool changed = false;
 };
 
 // A rendered token with its possible texts
@@ -162,7 +165,7 @@ class const_eval
 
     bool unary(int16_t &v)
     {
-        if(at_punct("-") || at_punct("+"))
+        if((at_punct("-") || at_punct("+")) && t[p].table == "T_EXPR")
         {
             bool neg = t[p].lit == "-";
             p++;
@@ -304,7 +307,6 @@ bool const_token(const token &t)
 //---------------------------------------------------------------------
 class short_writer
 {
-    const grammar &g;
     const program &p;
     const list_options &opt;
     opt_settings O;
@@ -561,6 +563,7 @@ class short_writer
             return false;
         s.toks = std::move(cand);
         s.text = txt;
+        s.changed = true;
         return true;
     }
 
@@ -597,6 +600,10 @@ class short_writer
         for(auto &n : st.nodes)
         {
             if(n.tend < n.tbeg + 2 || n.tend > s.toks.size())
+                continue;
+            // Only complete expressions
+            if(n.table != "INT_EXPR" && n.table != "T_EXPR" && n.table != "PAR_EXPR" &&
+               n.table != "EXPR")
                 continue;
             bool ok = true;
             for(size_t i = n.tbeg; ok && i < n.tend; i++)
@@ -655,43 +662,6 @@ class short_writer
             if(try_toks(s, c))
                 i--;
         }
-    }
-
-    void opt_inc_dec(ostmt &s) const
-    {
-        auto &t = s.toks;
-        if(t.size() < 5 || t[0].kind != tk::var)
-            return;
-        // Find the end of the left side
-        size_t eq = 1;
-        if(is_punct(t[1], "("))
-        {
-            eq = matching(t, 1);
-            if(!eq)
-                return;
-            eq++;
-        }
-        if(eq >= t.size() || !is_punct(t[eq], "="))
-            return;
-        size_t n = eq; // Length of left side
-        auto r = eq + 1;
-        if(t.size() != r + n + 2)
-            return;
-        // X = X + 1 or X = X - 1
-        bool is_inc;
-        if(same_tokens(t, 0, n, t, r, r + n) && t[r + n + 1].kind == tk::num &&
-           t[r + n + 1].value == 1 && (is_punct(t[r + n], "+") || is_punct(t[r + n], "-")))
-            is_inc = t[r + n].lit == "+";
-        // X = 1 + X
-        else if(t[r].kind == tk::num && t[r].value == 1 && is_punct(t[r + 1], "+") &&
-                same_tokens(t, 0, n, t, r + 2, r + 2 + n))
-            is_inc = true;
-        else
-            return;
-        std::vector<token> c;
-        c.push_back(make_tok(tk::kw, is_inc ? "INC" : "DEc", "STATEMENT"));
-        c.insert(c.end(), t.begin(), t.begin() + n);
-        try_toks(s, c);
     }
 
     void opt_defaults(ostmt &s) const
@@ -904,6 +874,61 @@ class short_writer
                          is_kw(t[i - 1], "ADR("));
     }
 
+    void opt_inc_dec(ostmt &s) const
+    {
+        // Apply to the statement after the last THEN, or to the whole statement
+        size_t b = 0;
+        for(size_t i = 0; i < s.toks.size(); i++)
+            if(is_kw(s.toks[i], "Then") && s.toks[i].table == "THEN_OR_MULTILINE")
+                b = i + 1;
+        std::vector<token> t(s.toks.begin() + b, s.toks.end());
+        if(t.size() < 5 || t[0].kind != tk::var)
+            return;
+        // Find the end of the left side
+        size_t eq = 1;
+        if(is_punct(t[1], "("))
+        {
+            eq = matching(t, 1);
+            if(!eq)
+                return;
+            eq++;
+        }
+        if(eq >= t.size() || !is_punct(t[eq], "="))
+            return;
+        size_t n = eq; // Length of left side
+        auto r = eq + 1;
+        if(t.size() != r + n + 2)
+            return;
+        // X = X + 1 or X = X - 1
+        bool is_inc;
+        if(same_tokens(t, 0, n, t, r, r + n) && t[r + n + 1].kind == tk::num &&
+           t[r + n + 1].value == 1 && (is_punct(t[r + n], "+") || is_punct(t[r + n], "-")))
+            is_inc = t[r + n].lit == "+";
+        // X = 1 + X
+        else if(t[r].kind == tk::num && t[r].value == 1 && is_punct(t[r + 1], "+") &&
+                same_tokens(t, 0, n, t, r + 2, r + 2 + n))
+            is_inc = true;
+        else
+            return;
+        // The array index is evaluated only once, so it must not have side
+        // effects, allow only variables, numbers and operators.
+        for(size_t i = 1; i < n; i++)
+            if(t[i].kind != tk::var && t[i].kind != tk::num &&
+               !(t[i].kind == tk::punct && const_token(t[i])) &&
+               !(t[i].kind == tk::kw && const_token(t[i])))
+                return;
+        std::vector<token> c(s.toks.begin(), s.toks.begin() + b);
+        c.push_back(make_tok(tk::kw, is_inc ? "INC" : "DEc", "STATEMENT"));
+        c.insert(c.end(), t.begin(), t.begin() + n);
+        std::string txt;
+        if(render(c, [&](const std::string &x) { return check_subst(s, x); }, txt, false) &&
+           txt.size() < s.text.size())
+        {
+            s.toks = c;
+            s.text = txt;
+        }
+    }
+
     // CHR$(n) to a constant string
     void opt_chr_str(ostmt &s) const
     {
@@ -1078,10 +1103,16 @@ class short_writer
     }
 
   public:
-    bool phase2_enabled() const { return O[OPT_CONST_REPLACE] || O[OPT_CHR_STR]; }
+    bool phase2_enabled() const
+    {
+        return O[OPT_CONST_REPLACE] || O[OPT_CHR_STR] || O[OPT_INC_DEC];
+    }
 
     void build2()
     {
+        if(O[OPT_INC_DEC])
+            for(auto &s : out)
+                opt_inc_dec(s);
         if(O[OPT_CHR_STR])
             for(auto &s : out)
                 opt_chr_str(s);
@@ -1090,13 +1121,15 @@ class short_writer
     }
 
   public:
+    // Only apply the optimizations useful for the long listing
+    bool for_long = false;
     // Statements added at the start of the program
     std::vector<std::string> init_stmts;
     // Constants replaced by variables
     const_vars cvars;
 
     short_writer(const grammar &g, const program &p, const list_options &opt)
-        : g(g), p(p), opt(opt), ren(p), ver(g, p, &nm), kwset(grammar_keywords(g))
+        : p(p), opt(opt), ren(p), ver(g, p, &nm), kwset(grammar_keywords(g))
     {
         if(opt.opts)
             O = *opt.opts;
@@ -1177,11 +1210,10 @@ class short_writer
         {
             if(O[OPT_CONST_FOLD])
                 opt_const_fold(s);
-            opt_adr(s);
+            if(!for_long)
+                opt_adr(s);
             if(O[OPT_CMP_ZERO])
                 opt_cmp_zero(s);
-            if(O[OPT_INC_DEC])
-                opt_inc_dec(s);
             if(O[OPT_DEFAULTS])
                 opt_defaults(s);
             if(O[OPT_NEXT_VAR])
@@ -1193,11 +1225,31 @@ class short_writer
             if(O[OPT_PARENS])
                 opt_parens(s);
         }
+        if(for_long)
+            return true;
         if(O[OPT_IF_THEN])
             opt_if_then();
         if(O[OPT_END])
             opt_end();
         return true;
+    }
+
+    // Returns the optimized text of modified statements, by statement number
+    std::map<size_t, std::string> changed_statements() const
+    {
+        std::map<size_t, std::string> ret;
+        for(auto &s : out)
+        {
+            if(!s.changed)
+                continue;
+            for(size_t i = s.first; i < s.last; i++)
+                if(!p.stmts[i].empty() && !p.stmts[i].is_comment())
+                {
+                    ret[i] = s.text;
+                    break;
+                }
+        }
+        return ret;
     }
 
     std::string pack(list_stats &stats) const
@@ -1285,6 +1337,26 @@ class short_writer
     }
 };
 } // namespace
+
+std::map<size_t, std::string> optimize_for_long(const grammar &g, const program &p,
+                                                const list_options &opt)
+{
+    // Only optimizations that don't make the listing less readable
+    opt_settings os;
+    if(opt.opts)
+        for(auto id : {OPT_CONST_FOLD, OPT_CMP_ZERO, OPT_DEFAULTS})
+            os.on[id] = (*opt.opts)[id];
+    if(!os.any())
+        return {};
+    list_options o = opt;
+    o.full_names = true;
+    o.opts = &os;
+    short_writer w(g, p, o);
+    w.for_long = true;
+    if(!w.build())
+        return {};
+    return w.changed_statements();
+}
 
 bool list_short(std::ostream &out, const grammar &g, const program &p,
                 const list_options &opt, list_stats &stats)

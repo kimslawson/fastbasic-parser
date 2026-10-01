@@ -32,10 +32,10 @@ enum opt_id
     OPT_DEFAULTS,
     OPT_CONST_FOLD,
     OPT_CMP_ZERO,
-    OPT_INC_DEC,
     OPT_IF_THEN,
     OPT_END,
-    // Trade-offs, only enabled explicitly or by "-S"
+    // Changes the compiled code, only enabled explicitly or by "-S"
+    OPT_INC_DEC,
     OPT_CONST_REPLACE,
     OPT_CHR_STR,
     OPT_COUNT

@@ -282,8 +282,6 @@ int main(int argc, char **argv)
         cmd_error(prog, "only one of output file name or extension should be supplied");
     if(extension.empty())
         extension = ".lst";
-    if(mode == out_type::longlist && opts.any() && verbose)
-        std::cerr << prog << ": note, optimizations only apply to the short listing.\n";
     if(mode == out_type::shortlist && lopt.max_line > 255 && verbose)
         std::cerr << prog << ": warning, lines longer than 255 characters can't be "
                              "edited in the FastBasic IDE.\n";
@@ -325,6 +323,21 @@ int main(int argc, char **argv)
             continue;
         }
 
+        // Note for programmers used to TurboBasic XL
+        if(verbose > 1)
+            for(size_t i = 0; i + 1 < p.stmts.size(); i++)
+            {
+                bool then = false;
+                for(auto &t : p.stmts[i].toks)
+                    then = then || (t.kind == tk::kw && t.lit == "Then" &&
+                                    t.table == "THEN_OR_MULTILINE");
+                auto &n = p.stmts[i + 1];
+                if(then && !n.line_start && !n.empty() && !n.is_comment())
+                    std::cerr << in << ":" << n.line
+                              << ": note, statements after 'IF ... THEN statement:' are "
+                                 "not conditional in FastBasic.\n";
+            }
+
         // Write the listing to memory, so we can verify it
         std::ostringstream os;
         list_stats st;
@@ -341,7 +354,7 @@ int main(int argc, char **argv)
         auto text = os.str();
 
         // Verify the complete output
-        bool optimized = mode == out_type::shortlist && opts.any();
+        bool optimized = opts.any();
         auto verify_err = verify_output(g, p, in, text, st, optimized);
         if(!verify_err.empty())
         {
@@ -349,9 +362,13 @@ int main(int argc, char **argv)
             all_ok = false;
         }
         else if(verbose > 1)
-            std::cerr << in << ": verified, the output compiles to the same code"
-                      << (optimized ? " (after the FastBasic optimizer)" : "")
-                      << (st.cvars.empty() ? ".\n" : ", with constants replaced.\n");
+        {
+            if(st.pre_text.empty())
+                std::cerr << in << ": verified, the output compiles to the same code"
+                          << (optimized ? " (after the FastBasic optimizer).\n" : ".\n");
+            else
+                std::cerr << in << ": verified, the output compiles to equivalent code.\n";
+        }
 
         // Write the output
         if(outname == "-")

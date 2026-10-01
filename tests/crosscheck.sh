@@ -70,7 +70,7 @@ for f in *.bas; do
             s)  opt="-s";    fbopt="-n" ;;
             sO) opt="-s -O"; fbopt="" ;;
             # Without the optimizations that change the code
-            SX) opt="-S -O -const_replace -O -chr_str"; fbopt="" ;;
+            SX) opt="-S -O -const_replace -O -chr_str -O -inc_dec"; fbopt="" ;;
             # With all optimizations, only checks that it compiles
             S)  opt="-S";    fbopt="" ;;
         esac

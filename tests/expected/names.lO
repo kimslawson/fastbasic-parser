@@ -1,0 +1,15 @@
+' Variable names that look like keywords
+X = 1234
+DATAVAR = DPEEK(ADR(X))
+PRINT DATAVAR
+DATA pos() BYTE = 1, 2, 3, 4
+pos(0) = pos(0) + 2
+PRINT pos(0)
+A = -1
+PRINT ABS(A), ABS(A)
+ABSA = 10
+PRINT ABSA
+INCX = 5
+PRINT INCX
+PRINTED = 3
+PRINT PRINTED

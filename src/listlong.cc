@@ -52,16 +52,18 @@ struct wtok
 
 class long_writer
 {
-    const grammar &g;
     const program &p;
     const list_options &opt;
     verifier ver;
     // Variable and label spelling, from first appearance
     std::map<std::string, std::string> var_name, label_name;
+    // Statements modified by the optimizations
+    std::map<size_t, std::string> optimized;
 
   public:
     long_writer(const grammar &g, const program &p, const list_options &opt)
-        : g(g), p(p), opt(opt), ver(g, p, nullptr)
+        : p(p), opt(opt), ver(g, p, nullptr),
+          optimized(optimize_for_long(g, p, opt))
     {
         for(auto &s : p.stmts)
             for(auto &t : s.toks)
@@ -274,6 +276,22 @@ class long_writer
     std::string statement_text(size_t n, const std::string &next_var, int &failed) const
     {
         auto &s = p.stmts[n];
+        // Use the optimized statement if available
+        auto it = optimized.find(n);
+        if(it != optimized.end())
+        {
+            statement o = s;
+            engine_state end;
+            code_map code;
+            if(ver.parse(s.before, it->second, end, code, &o.toks, &o.nodes))
+            {
+                if(s.has_comment())
+                    o.toks.push_back(s.toks.back());
+                auto txt = render(expand(o, next_var, true));
+                if(ver.check(n, n + 1, {txt}, verify_mode::optimized))
+                    return txt;
+            }
+        }
         auto txt = render(expand(s, next_var, true));
         if(ver.check(n, n + 1, {txt}, verify_mode::raw))
             return txt;

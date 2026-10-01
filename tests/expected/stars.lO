@@ -1,0 +1,61 @@
+' Catch the falling stars - a sample program for fbp
+'
+' This is a readable source, try:
+'   fbp -S samples/stars.bas    (minimized, for a 10-liner)
+'   fbp -l samples/stars.lst    (back to a readable listing)
+
+GRAPHICS 0
+POKE 752, 1 ' Hide the cursor
+SETCOLOR 2, 0, 0
+
+DIM starX(4), starY(4)
+score = 0
+lives = 3
+playerX = 20
+
+' Place all the stars at random positions
+FOR i = 0 TO 4
+  starX(i) = RAND(38) + 1
+  starY(i) = RAND(10)
+NEXT i
+
+PROC drawPlayer
+  POSITION playerX - 1, 22
+  PRINT " ^ ";
+ENDPROC
+
+REPEAT
+  ' Read the joystick
+  joy = STICK(0)
+  IF joy = 11 AND playerX > 1 THEN playerX = playerX - 1
+  IF joy = 7 AND playerX < 38 THEN playerX = playerX + 1
+  EXEC drawPlayer
+
+  FOR i = 0 TO 4
+    POSITION starX(i), starY(i)
+    PRINT " ";
+    starY(i) = starY(i) + 1
+    IF starY(i) = 22
+      IF ABS(starX(i) - playerX) <= 1
+        score = score + 10
+        SOUND 0, 100, 10, 8
+      ELSE
+        lives = lives - 1
+        SOUND 0, 200, 12, 8
+      ENDIF
+      starX(i) = RAND(38) + 1
+      starY(i) = 0
+    ENDIF
+    POSITION starX(i), starY(i)
+    PRINT "*";
+  NEXT i
+
+  POSITION 0, 0
+  PRINT "Score: "; score; "  Lives: "; lives; " ";
+  PAUSE 4
+  SOUND
+UNTIL lives = 0
+
+POSITION 15, 10
+PRINT "GAME"; CHR$(32); "OVER"
+END

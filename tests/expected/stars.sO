@@ -1,0 +1,4 @@
+G.0:P.752,1:SE.2,0,0:DI.D(4),C(4):F=0:E=3:B=20:F.A=0T.4:D(A)=R.38+1:C(A)=R.10:N.:PR.A:POS.B-1,22:?" ^ ";:ENDP.:R.:G=S.0
+I.G=11A.B>1T.B=B-1:I.G=7A.B<38T.B=B+1:@A:F.A=0T.4:POS.D(A),C(A):?" ";:C(A)=C(A)+1:I.C(A)=22:I.A.(D(A)-B)<=1:F=F+10
+S.0,100,10,8:EL.:E=E-1:S.0,200,12,8:E.:D(A)=R.38+1:C(A)=0:E.:POS.D(A),C(A):?"*";:N.:POS.0,0:?"Score: "F"  Lives: "E" ";
+PA.4:S.:U.E=0:POS.15,10:?"GAME OVER"

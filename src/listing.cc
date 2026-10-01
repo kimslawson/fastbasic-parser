@@ -333,9 +333,16 @@ int function_arg(const std::vector<node> &nodes, size_t idx)
     int n = outer_node_at(nodes, idx + 1);
     if(n < 0)
         return -1;
-    auto &t = nodes[n].table;
-    if(t == "T_EXPR" || t == "FP_T_EXPR" || t == "STR_EXPR")
+    auto is_arg = [](const std::string &t)
+    { return t == "T_EXPR" || t == "FP_T_EXPR" || t == "STR_EXPR"; };
+    if(is_arg(nodes[n].table))
         return n;
+    // PADDLE, STICK, PTRIG and STRIG have the argument inside "RD_PORT"
+    if(nodes[n].table == "RD_PORT")
+        for(size_t i = 0; i < nodes.size(); i++)
+            if(nodes[i].tbeg == nodes[n].tbeg && nodes[i].tend == nodes[n].tend &&
+               is_arg(nodes[i].table))
+                return i;
     return -1;
 }
 
