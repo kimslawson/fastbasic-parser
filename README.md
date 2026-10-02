@@ -295,6 +295,13 @@ engine in `src/engine.cc` is a port of the FastBasic parser; if the files in
 `vendor/fastbasic/reference` changed, port the changes to `src/engine.cc`.
 
 
+## Testing FastBasic itself
+
+`docs/fastbasic-stress-test.md` describes how to use `fbp` to look for bugs in
+FastBasic (comparing the native and cross compilers with rewritten programs),
+with some leads found while writing `fbp`.
+
+
 ## License
 
 `fbp` is free software, under the GNU General Public License version 2 or
