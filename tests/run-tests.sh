@@ -24,14 +24,14 @@ total=0
 fail=0
 for f in "$D"/progs/*.bas "$D"/../samples/*.bas; do
     b="$(basename "$f" .bas)"
-    for m in l lO lF s sO S Sa; do
+    for m in l lO lF s sO S80 Sa; do
         case $m in
             l)  opt="-l" ;;
             lO) opt="-l -u -O" ;;
             lF) opt="-l -O +fixed_vars" ;;
             s)  opt="-s -e" ;;
             sO) opt="-s -e -O" ;;
-            S)  opt="-S -e -n 80" ;;
+            S80) opt="-S -e -n 80" ;;
             Sa) opt="-S" ;;
         esac
         total=$((total + 1))
