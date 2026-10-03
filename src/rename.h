@@ -35,6 +35,7 @@ struct symbol_info
     bool is_label = false;
     bool is_proc = false;
     int type = 0;        // Variable type
+    bool no_share = false; // Its name can't be shared between a variable and a label
 };
 
 class renamer
