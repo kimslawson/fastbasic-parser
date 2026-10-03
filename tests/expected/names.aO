@@ -1,0 +1,22 @@
+' Renamed variables (source -> this listing):
+'   X -> B, DATAVAR -> C, ABSA -> D, INCX -> E, PRINTED -> F
+' Renamed labels (DATA, DLI and PROC names):
+'   pos -> G
+
+' ==== line 1 of 2 (80 characters) ====
+' Variable names that look like keywords
+B = 1234
+C = dpeek(adr(B))
+print C
+data G() byte = 1, 2, 3, 4
+G(0) = G(0) + 2
+print G(0)
+A = -1
+print abs(A), abs(A)
+D = 10
+print D
+E = 5
+print E
+' ==== line 2 of 2 (6 characters) ====
+F = 3
+print F

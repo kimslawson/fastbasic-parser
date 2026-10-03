@@ -1,0 +1,43 @@
+' Renamed variables (source -> this listing):
+'   i -> A, a -> B
+
+' ==== line 1 of 3 (80 characters) ====
+for A = 0 to 5
+  if A = 0
+    print "zero"
+  elif A = 1
+    print "one"
+  elif A = 2
+    print "two"
+  else
+    print "many"
+  endif
+  if A > 3
+    print "big"
+' ==== line 2 of 3 (80 characters) ====
+  elif A = 3
+    print "three"
+  endif
+next A
+' Comments must be kept
+B = 1
+if B = 0
+  print "zero"
+else ' not zero
+  if B = 1
+    print "one"
+  endif
+endif
+if B = 0
+  print "zero"
+elif B = 1 ' one?
+' ==== line 3 of 3 (41 characters) ====
+  print "one"
+endif ' end inner
+if B = 0
+  print "zero"
+else
+  if B = 1
+    print "one"
+  endif ' end inner
+endif ' end outer

@@ -34,6 +34,7 @@
 #include "optimize.h"
 #include "rename.h"
 #include <algorithm>
+#include <cstdint>
 #include <functional>
 #include <iostream>
 #include <map>
@@ -1415,11 +1416,15 @@ class short_writer
         std::ostringstream os;
         const char *eol = opt.ascii_eol ? "\n" : "\x9b";
         std::string line;
+        size_t line_src = SIZE_MAX;
         auto flush = [&]()
         {
             if(line.empty())
                 return;
             os << line << eol;
+            stats.line_first.push_back(line_src);
+            stats.line_len.push_back(line.size());
+            line_src = SIZE_MAX;
             stats.lines++;
             stats.bytes += line.size() + 1;
             stats.max_len = std::max<int>(stats.max_len, line.size());
@@ -1488,6 +1493,8 @@ class short_writer
                 line_blocks.clear();
                 line = s.text;
             }
+            if(line_src == SIZE_MAX)
+                line_src = s.first;
             line_blocks.insert(line_blocks.end(), nb.begin(), nb.end());
         }
         flush();

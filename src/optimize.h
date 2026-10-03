@@ -68,6 +68,8 @@ struct opt_settings
     void set_default();
     // Enables all optimizations that make the listing shorter
     void set_shorter();
+    // Disables all optimizations that change the compiled code
+    void unset_code_changing();
     // Applies an option from the command line, "+name" or "name" enables,
     // "-name" disables. Returns false if the name is invalid.
     bool apply(const std::string &arg);

@@ -24,7 +24,7 @@ total=0
 fail=0
 for f in "$D"/progs/*.bas "$D"/../samples/*.bas; do
     b="$(basename "$f" .bas)"
-    for m in l lO lF s sO S80 Sa; do
+    for m in l lO lF s sO S80 Sa aO; do
         case $m in
             l)  opt="-l" ;;
             lO) opt="-l -u -O" ;;
@@ -33,6 +33,7 @@ for f in "$D"/progs/*.bas "$D"/../samples/*.bas; do
             sO) opt="-s -e -O" ;;
             S80) opt="-S -e -n 80" ;;
             Sa) opt="-S" ;;
+            aO) opt="-a -O -n 80" ;;
         esac
         total=$((total + 1))
         out="$T/$b.$m"

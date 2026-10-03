@@ -138,6 +138,30 @@ Options:
 - `-u`  In long listing, write keywords in uppercase (the default is
         lowercase).
 
+- `-a`  Output an annotated listing: the long listing, with all the
+        comments of the source, but written with the names that the short
+        listing uses, so it reads as the expanded version of exactly the
+        program you submit. A comment block at the top lists the renamed
+        variables and labels, and a comment line marks where each line of
+        the short listing starts, with its length:
+        `' ==== line 3 of 10 (116 characters) ====`. The mark goes above the
+        comments just before that statement. The short listing options
+        (`-n`, `-f`, `-O`, `-S`) decide the names and the line breaks; the
+        long listing itself gets no optimizations except `elif`, so the
+        statements stay as you wrote them. Made for contests that give a
+        bonus for an explained listing next to the packed one.
+
+- `-C fb`  Also check the output with the real compiler: compile the input
+        and the output with the FastBasic cross-compiler `fb` (for the
+        target given with `-t`) and fail if the two binaries differ. Also
+        `--compiler fb` or `--compiler=fb`. The copies are compiled next to
+        the input, so `DATA ... FILE` finds its files, and removed after.
+        With optimizations that change the code (`-S`), the listing before
+        those is the one compiled, as the final one is supposed to differ.
+        This is on top of the built-in verification, and catches what the
+        embedded grammar can't, like a different FastBasic version. Example:
+        `fbp -O -t atari-int -C ~/fastbasic/bin/fastbasic game.bas`.
+
 - `-O`  Optimize the program. Without an argument enables all the
         optimizations that produce the same compiled code; an argument can
         be given to enable (`+name` or `name`) or disable (`-name`) one
