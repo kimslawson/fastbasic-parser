@@ -24,8 +24,10 @@
 #include "program.h"
 #include "verify.h"
 
+#include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <ctime>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -83,6 +85,13 @@ static void print_header()
            "  -f      In short listing, keep the full variable and PROC names.\n"
            "  -e      In short listing, use standard (ASCII) end of lines.\n"
            "  -u      In long listing, write keywords in uppercase.\n"
+           "  -a      Annotated listing: the long listing, with the comments of the\n"
+           "          source, but with the names of the short listing, a list of\n"
+           "          the renamed ones, and a comment marking where each of its\n"
+           "          lines starts. The short listing options apply (-n, -f, -O).\n"
+           "  -C fb   Compile the input and the output with the FastBasic compiler\n"
+           "          'fb' and check that the binaries are identical. Also\n"
+           "          '--compiler fb'.\n"
            "  -O      Optimize the program, an optional argument with '+' or '-'\n"
            "          enables/disables a specific optimization. Use '-O help' for\n"
            "          a list of all available options.\n"
@@ -151,8 +160,101 @@ static std::string verify_output(const grammar &g, const program &p,
 enum class out_type
 {
     longlist,
-    shortlist
+    shortlist,
+    annotated
 };
+
+static std::string read_file(const std::string &name)
+{
+    std::ifstream f(name, std::ios::binary);
+    std::ostringstream os;
+    os << f.rdbuf();
+    return os.str();
+}
+
+static std::string quote(const std::string &s)
+{
+    return "\"" + s + "\"";
+}
+
+// Compiles "text" with the FastBasic compiler "fb", as "dir/stem.bas". Returns
+// the binary in "bin", or an error message.
+static std::string fb_compile(const std::string &fb, const std::string &target,
+                              const std::filesystem::path &dir, const std::string &stem,
+                              const std::string &text, std::string &bin)
+{
+    namespace fs = std::filesystem;
+    auto base = dir / stem;
+    auto path = [&](const char *ext) { return base.string() + ext; };
+    {
+        std::ofstream f(path(".bas"), std::ios::binary);
+        if(!f || !f.write(text.data(), text.size()))
+            return "can't write '" + path(".bas") + "'";
+    }
+    auto cmd = quote(fb) + " " + quote("-t:" + target) + " " + quote(path(".bas")) + " > " +
+               quote(path(".log")) + " 2>&1";
+#ifdef _WIN32
+    cmd = "\"" + cmd + "\"";
+#endif
+    int r = std::system(cmd.c_str());
+    std::string err;
+    bin.clear();
+    for(auto ext : {".xex", ".rom", ".bin"})
+        if(fs::exists(path(ext)))
+            bin = read_file(path(ext));
+    if(r != 0 || bin.empty())
+    {
+        err = read_file(path(".log"));
+        while(!err.empty() && (err.back() == '\n' || err.back() == '\r'))
+            err.pop_back();
+        err = "the compiler failed" + (err.empty() ? std::string() : ":\n" + err);
+    }
+    std::error_code ec;
+    for(auto ext : {".bas", ".asm", ".o", ".xex", ".rom", ".bin", ".log", ".lbl", ".lst"})
+        fs::remove(path(ext), ec);
+    return err;
+}
+
+// Compiles the original and the output with the given compiler and checks
+// that the binaries are the same. Returns an error message, or empty.
+static std::string compiler_check(const std::string &fb, const std::string &target,
+                                  const program &p, const std::string &in,
+                                  const std::string &text, int verbose)
+{
+    namespace fs = std::filesystem;
+    // Compile next to the input, so DATA ... FILE finds its files; fall back
+    // to the temporary folder.
+    fs::path dir = fs::absolute(in).parent_path();
+    auto stem = "fbp_check_" + std::to_string(std::rand() % 100000);
+    std::string b1, b2, original = read_file(in);
+    auto err = fb_compile(fb, target, dir, stem + "a", original, b1);
+    if(!err.empty())
+    {
+        dir = fs::temp_directory_path();
+        err = fb_compile(fb, target, dir, stem + "a", original, b1);
+        if(!err.empty())
+            return "compiling the original with '" + fb + "': " + err;
+    }
+    err = fb_compile(fb, target, dir, stem + "b", text, b2);
+    if(!err.empty())
+        return "compiling the output with '" + fb + "': " + err;
+    if(b1 == b2)
+    {
+        if(verbose > 0)
+            std::cerr << in << ": checked with '" << fb << "', the binaries are identical ("
+                      << b1.size() << " bytes).\n";
+        return std::string();
+    }
+    std::string msg = "the output compiled with '" + fb + "' is not identical to the original";
+    auto ph = phantom_vars(p);
+    if(!ph.empty())
+    {
+        msg += " (the original creates " + std::to_string(ph.size()) +
+               " unused variables while parsing, like '" + *ph.begin() +
+               "', the output does not, so the variable area can differ)";
+    }
+    return msg + ".";
+}
 
 int main(int argc, char **argv)
 {
@@ -160,8 +262,9 @@ int main(int argc, char **argv)
     out_type mode = out_type::shortlist;
     list_options lopt;
     opt_settings opts;
-    std::string output, extension, target = "default";
+    std::string output, extension, target = "default", compiler;
     std::vector<std::string> files;
+    std::srand(unsigned(std::time(nullptr)));
 
     // Parse options, similar to getopt
     for(int i = 1; i < argc; i++)
@@ -170,6 +273,16 @@ int main(int argc, char **argv)
         if(arg.size() < 2 || arg[0] != '-')
         {
             files.push_back(arg);
+            continue;
+        }
+        if(arg.compare(0, 10, "--compiler") == 0)
+        {
+            if(arg.size() > 11 && arg[10] == '=')
+                compiler = arg.substr(11);
+            else if(arg.size() == 10 && i + 1 < argc)
+                compiler = argv[++i];
+            else
+                cmd_error(prog, "option '--compiler' needs an argument");
             continue;
         }
         if(arg == "--")
@@ -182,7 +295,7 @@ int main(int argc, char **argv)
         {
             char c = arg[j];
             // Options with arguments
-            if(c == 'n' || c == 'o' || c == 't')
+            if(c == 'n' || c == 'o' || c == 't' || c == 'C')
             {
                 std::string val;
                 if(j + 1 < arg.size())
@@ -207,6 +320,8 @@ int main(int argc, char **argv)
                     else
                         output = val;
                 }
+                else if(c == 'C')
+                    compiler = val;
                 else
                     target = val;
                 break;
@@ -218,6 +333,9 @@ int main(int argc, char **argv)
                 break;
             case 's':
                 mode = out_type::shortlist;
+                break;
+            case 'a':
+                mode = out_type::annotated;
                 break;
             case 'S':
                 mode = out_type::shortlist;
@@ -349,8 +467,38 @@ int main(int argc, char **argv)
         bool ok;
         if(mode == out_type::longlist)
             ok = list_long(os, g, p, lopt, st);
-        else
+        else if(mode == out_type::shortlist)
             ok = list_short(os, g, p, lopt, st);
+        else
+        {
+            // Annotated: make the short listing first, for its names and lines
+            std::ostringstream ss;
+            list_stats sst;
+            list_options so = lopt;
+            so.verbose = verbose > 1 ? verbose : 0;
+            ok = list_short(ss, g, p, so, sst);
+            if(ok)
+            {
+                list_options lo = lopt;
+                lo.rename = &sst.names;
+                int nl = sst.line_first.size();
+                for(int k = 0; k < nl; k++)
+                    if(sst.line_first[k] != SIZE_MAX)
+                        lo.marks[sst.line_first[k]] =
+                            "' ==== line " + std::to_string(k + 1) + " of " +
+                            std::to_string(nl) + " (" + std::to_string(sst.line_len[k]) +
+                            " characters) ====";
+                // The long listing does not apply code-changing optimizations
+                opt_settings lopts = opts;
+                lopts.unset_code_changing();
+                lo.opts = &lopts;
+                ok = list_long(os, g, p, lo, st);
+                st.names = sst.names;
+                if(ok && verbose)
+                    std::cerr << in << ": annotated listing of " << nl << " lines, "
+                              << sst.bytes - nl << " characters.\n";
+            }
+        }
         if(!ok)
         {
             all_ok = false;
@@ -361,6 +509,21 @@ int main(int argc, char **argv)
         // Verify the complete output
         bool optimized = opts.any();
         auto verify_err = verify_output(g, p, in, text, st, optimized);
+        // And with the real compiler, if given. With optimizations that change
+        // the code, the listing before those is the one that must be identical.
+        if(verify_err.empty() && !compiler.empty())
+        {
+            auto same = st.pre_text.empty() ? text : st.pre_text;
+            auto err = compiler_check(compiler, target, p, in, same, verbose);
+            if(!err.empty())
+            {
+                std::cerr << in << ": error, " << err << "\n";
+                all_ok = false;
+            }
+            else if(!st.pre_text.empty() && verbose > 0)
+                std::cerr << in << ": note, the final output differs from that only by "
+                             "the code-changing optimizations, verified by fbp.\n";
+        }
         if(!verify_err.empty())
         {
             std::cerr << in << ": internal error, " << verify_err << "\n";

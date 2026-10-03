@@ -102,6 +102,13 @@ void opt_settings::set_shorter()
             on[i] = true;
 }
 
+void opt_settings::unset_code_changing()
+{
+    for(int i = 0; i < OPT_COUNT; i++)
+        if(!opts[i].same_code)
+            on[i] = false;
+}
+
 bool opt_settings::apply(const std::string &arg)
 {
     bool set = true;

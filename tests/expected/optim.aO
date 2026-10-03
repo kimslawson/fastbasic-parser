@@ -1,0 +1,26 @@
+' Renamed variables (source -> this listing):
+'   arr -> C, X -> A, I -> B
+
+' ==== line 1 of 2 (80 characters) ====
+' Optimizations
+dim C(10) word
+A = 10
+poke 704 + 4, 15 * 16
+graphics 8 + 16
+graphics 0
+for B = 0 to 10 step 1
+  if A <> 0
+    print B;
+  endif
+  if B > 5
+    A = A - 1
+  endif
+  C(B) = C(B) + 1
+next B
+' ==== line 2 of 2 (44 characters) ====
+A = A + 1
+pause 0
+print peek(712) + abs(-A) + rand(10) * 0
+print (A * 2) + (A / 2)
+print "A"; "B"; chr$(67)
+end
