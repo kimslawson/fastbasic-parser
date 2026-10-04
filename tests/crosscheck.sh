@@ -64,7 +64,7 @@ for f in *.bas; do
             tgt=atari-int
         fi
     fi
-    for mode in l s sO SX S lF; do
+    for mode in l s sO SX S lF aO; do
         case $mode in
             l)  opt="-l";    fbopt="-n" ;;
             s)  opt="-s";    fbopt="-n" ;;
@@ -74,6 +74,7 @@ for f in *.bas; do
             # With all optimizations, only checks that it compiles
             S)  opt="-S";    fbopt="" ;;
             lF) opt="-l -O +fixed_vars"; fbopt="" ;;
+            aO) opt="-a -O"; fbopt="" ;;
         esac
         total=$((total + 1))
         out="$b.fbp-$mode.bas"
