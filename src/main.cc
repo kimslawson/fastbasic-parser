@@ -27,11 +27,15 @@
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
-#include <ctime>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <sstream>
+#ifdef _WIN32
+#include <process.h>
+#else
+#include <unistd.h>
+#endif
 
 #define FBP_VERSION "0.1.0"
 
@@ -172,25 +176,80 @@ static std::string read_file(const std::string &name)
     return os.str();
 }
 
+#ifdef _WIN32
+static int process_id() { return _getpid(); }
+#else
+static int process_id() { return getpid(); }
+#endif
+
+// Quotes an argument for the shell that runs std::system()
 static std::string quote(const std::string &s)
 {
+#ifdef _WIN32
     return "\"" + s + "\"";
+#else
+    std::string r = "'";
+    for(char c : s)
+        r += c == '\'' ? std::string("'\\''") : std::string(1, c);
+    return r + "'";
+#endif
 }
 
-// Compiles "text" with the FastBasic compiler "fb", as "dir/stem.bas". Returns
-// the binary in "bin", or an error message.
+// Returns true if a path can be quoted safely for the shell. In Windows
+// "cmd" expands "%" even inside quotes.
+static bool can_quote(const std::string &s)
+{
+#ifdef _WIN32
+    return s.find_first_of("\"%") == s.npos;
+#else
+    (void)s;
+    return true;
+#endif
+}
+
+static bool write_file(const std::string &name, const std::string &text)
+{
+    std::ofstream f(name, std::ios::binary);
+    return f && f.write(text.data(), text.size());
+}
+
+// Extensions of the files the compiler can make
+static const char *const compile_exts[] = {".bas", ".asm", ".o",   ".xex", ".rom",
+                                           ".bin", ".log", ".lbl", ".lst"};
+
+static void remove_files(const std::string &base)
+{
+    std::error_code ec;
+    for(auto ext : compile_exts)
+        std::filesystem::remove(base + ext, ec);
+}
+
+// Returns a base name in "dir" for the files of one check, "a" and "b"
+// added, that no existing file uses.
+static std::string check_base(const std::filesystem::path &dir)
+{
+    for(int n = 0;; n++)
+    {
+        auto base = (dir / ("fbp_check_" + std::to_string(process_id()) + "_" +
+                            std::to_string(n)))
+                        .string();
+        bool used = false;
+        std::error_code ec;
+        for(auto sfx : {"a", "b"})
+            for(auto ext : compile_exts)
+                used = used || std::filesystem::exists(base + sfx + ext, ec);
+        if(!used)
+            return base;
+    }
+}
+
+// Compiles "base.bas" with the FastBasic compiler "fb". Returns the binary in
+// "bin", or an error message. Removes all the files.
 static std::string fb_compile(const std::string &fb, const std::string &target,
-                              const std::filesystem::path &dir, const std::string &stem,
-                              const std::string &text, std::string &bin)
+                              const std::string &base, std::string &bin)
 {
     namespace fs = std::filesystem;
-    auto base = dir / stem;
-    auto path = [&](const char *ext) { return base.string() + ext; };
-    {
-        std::ofstream f(path(".bas"), std::ios::binary);
-        if(!f || !f.write(text.data(), text.size()))
-            return "can't write '" + path(".bas") + "'";
-    }
+    auto path = [&](const char *ext) { return base + ext; };
     auto cmd = quote(fb) + " " + quote("-t:" + target) + " " + quote(path(".bas")) + " > " +
                quote(path(".log")) + " 2>&1";
 #ifdef _WIN32
@@ -209,9 +268,7 @@ static std::string fb_compile(const std::string &fb, const std::string &target,
             err.pop_back();
         err = "the compiler failed" + (err.empty() ? std::string() : ":\n" + err);
     }
-    std::error_code ec;
-    for(auto ext : {".bas", ".asm", ".o", ".xex", ".rom", ".bin", ".log", ".lbl", ".lst"})
-        fs::remove(path(ext), ec);
+    remove_files(base);
     return err;
 }
 
@@ -222,20 +279,31 @@ static std::string compiler_check(const std::string &fb, const std::string &targ
                                   const std::string &text, int verbose)
 {
     namespace fs = std::filesystem;
-    // Compile next to the input, so DATA ... FILE finds its files; fall back
-    // to the temporary folder.
-    fs::path dir = fs::absolute(in).parent_path();
-    auto stem = "fbp_check_" + std::to_string(std::rand() % 100000);
-    std::string b1, b2, original = read_file(in);
-    auto err = fb_compile(fb, target, dir, stem + "a", original, b1);
+    // Compile next to the input, so DATA ... FILE finds its files; if that
+    // folder can't be written, use the temporary folder.
+    std::error_code ec;
+    std::string original = read_file(in), base;
+    for(auto dir : {fs::absolute(in, ec).parent_path(), fs::temp_directory_path(ec)})
+    {
+        if(dir.empty() || !can_quote(dir.string()))
+            continue;
+        base = check_base(dir);
+        if(write_file(base + "a.bas", original) && write_file(base + "b.bas", text))
+            break;
+        remove_files(base + "a");
+        remove_files(base + "b");
+        base.clear();
+    }
+    if(base.empty())
+        return "can't write the files to compile";
+    std::string b1, b2;
+    auto err = fb_compile(fb, target, base + "a", b1);
     if(!err.empty())
     {
-        dir = fs::temp_directory_path();
-        err = fb_compile(fb, target, dir, stem + "a", original, b1);
-        if(!err.empty())
-            return "compiling the original with '" + fb + "': " + err;
+        remove_files(base + "b");
+        return "compiling the original with '" + fb + "': " + err;
     }
-    err = fb_compile(fb, target, dir, stem + "b", text, b2);
+    err = fb_compile(fb, target, base + "b", b2);
     if(!err.empty())
         return "compiling the output with '" + fb + "': " + err;
     if(b1 == b2)
@@ -264,7 +332,6 @@ int main(int argc, char **argv)
     opt_settings opts;
     std::string output, extension, target = "default", compiler;
     std::vector<std::string> files;
-    std::srand(unsigned(std::time(nullptr)));
 
     // Parse options, similar to getopt
     for(int i = 1; i < argc; i++)
