@@ -72,12 +72,13 @@ repeat
 ## Results
 
 Measured on the FastBasic samples and on two finished PUR-120 ten-liners,
-with FastBasic 4.7. The numbers are the minimized program's length with each
-line break counted as one character (the program as one line), so line
-breaking doesn't affect them. Every `fbp -O` output compiles to exactly the
+with FastBasic 4.7, against FastBasic's own minimized listing (`-ls:<num>`).
+The numbers are the minimized program's length with each line break counted
+as one character (the program as one line), so line breaking doesn't affect
+them. Every `fbp -O` output compiles to exactly the
 same XEX as the original with the FastBasic 4.7 cross-compiler.
 
-| Program | FastBasic `-l:min` | `fbp -O` | Saved | `fbp -O -f` (names kept) |
+| Program | FastBasic `-ls` | `fbp -O` | Saved | `fbp -O -f` (names kept) |
 |---|---|---|---|---|
 | PUR-120 ten-liner A (hand-golfed) | 1195 | 1170 | 25 (2%) | 1177 |
 | PUR-120 ten-liner B (hand-golfed) | 1154 | 1121 | 33 (3%) | 1134 |
@@ -155,7 +156,8 @@ Options:
         and the output with the FastBasic cross-compiler `fb` (for the
         target given with `-t`) and fail if the two binaries differ. Also
         `--compiler fb` or `--compiler=fb`. The copies are compiled next to
-        the input, so `DATA ... FILE` finds its files, and removed after.
+        the input, so `DATA ... FILE` finds its files (in the temporary
+        folder if that one can't be written), and removed after.
         With optimizations that change the code (`-S`), the listing before
         those is the one compiled, as the final one is supposed to differ.
         This is on top of the built-in verification, and catches what the
@@ -290,14 +292,18 @@ them:
 - **One name space for all variable types.** `A`, `A$`, `A%` and `A()` are
   the same name, so there are only 27 one-letter names (`A` to `Z` and `_`).
   PROC, DATA and DLI names are labels, in a separate name space, and can
-  repeat variable names, with three catches: `&X` and `ADR(X)` take the
-  address of DATA `X` before the address of variable `X`; `X(n)` reads an
-  array variable `X` before DATA `X`; and assigning to a DATA element
-  (`X(0)=1`, `GET`, `INPUT`) makes the parser create a variable `X` while it
-  tries other rules, which changes the code if `X` already exists. `fbp`
-  gives labels their own one-letter names and steers clear of those three.
+  repeat variable names, with some catches where the parser picks the other
+  one: `&X` and `ADR(X)` take the address of DATA `X` before the address of
+  variable `X`, and `X(n)` reads an array variable `X` before DATA `X`. With
+  floating point DATA it's the other way around: `&X%` is read as `&X` if `X`
+  is an integer variable, and `X%(n)` as `X%` if that is a floating point
+  variable. And assigning to a DATA element (`X(0)=1`, also after `THEN`)
+  makes the parser create a variable `X` while it tries other rules, which
+  changes the code if `X` already exists. `fbp` gives labels their own
+  one-letter names and steers clear of those cases, and if sharing a name
+  still fails its verification, it uses separate names for that program.
 
-- **EOL inside strings.** FastBasic's own `-l:min` writes an ATASCII end of
+- **EOL inside strings.** FastBasic's own `-ls` writes an ATASCII end of
   line inside a string as the raw $9B byte (the compiler keeps reading a line
   inside quotes). That is 2 characters shorter than `"$9B`, but it shows as a
   line break in the IDE and in the listing, so `fbp` always uses the `$9B`
