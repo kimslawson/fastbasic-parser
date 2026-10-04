@@ -20,14 +20,23 @@
 //
 // In FastBasic, all variables share the same name space independently of
 // the type (so "A", "A$" and "A%" can't coexist), and PROC, DATA and DLI names
-// share another name space. A label can reuse a variable's name, with two
-// exceptions where the parser would pick the wrong one: "&X" and "ADR(X)" take
-// the address of DATA X before the address of variable X, and "X(n)" reads an
-// array variable X before DATA X. So labels don't reuse the names of array
-// variables or of variables whose address is taken. And a DATA array that is
-// assigned to ("X(0)=1", GET, INPUT) makes the parser create a variable X while
-// it tries the other rules, which it can't do if X already exists: the code
-// would change, so those labels don't share names with any variable.
+// share another name space. PROC names can reuse any variable name. DATA and
+// DLI names can reuse variable names too, except where the parser would pick
+// the wrong one:
+//  - "&X" and "ADR(X)" take the address of DATA X before the address of
+//    variable X, and "X(n)" reads an array variable X before DATA X. So labels
+//    don't reuse the names of array variables or of variables whose address
+//    is taken.
+//  - Floating point DATA is tried after the variables: "&X%" is read as "&X"
+//    if X is an integer variable, and "X%(n)" as "X%" if X% is a floating
+//    point variable. So floating point DATA doesn't reuse any variable name.
+//  - Assigning to DATA ("X(0)=1", also after THEN) makes the parser create a
+//    variable X while it tries the other rules, which it can't do if X
+//    already exists, changing the code. So DATA that is assigned to doesn't
+//    reuse any variable name either.
+// These rules come from the grammar, which differs between targets, so
+// list_short verifies the listing and makes it again with separate names if
+// sharing them fails.
 
 #include "rename.h"
 #include <algorithm>
@@ -84,16 +93,22 @@ renamer::renamer(const program &p)
                 symbols.push_back(si);
             }
             symbols[it->second].count++;
-            // Assigned to: at the start of a statement, or in GET / INPUT
-            if(lbl && (ti == 0 || (s.toks[0].kind == tk::kw &&
-                                   (s.toks[0].lit == "GEt" || s.toks[0].lit == "INput"))))
-                symbols[it->second].no_share = true;
-            // Address taken: "&X" (the address operator, not the bitwise AND) or "ADR(X"
-            if(!lbl && ti > 0)
+            if(lbl)
             {
+                // Assigned to: at the start of a statement, or after THEN
+                if(ti == 0 || (s.toks[ti - 1].kind == tk::kw && s.toks[ti - 1].lit == "Then"))
+                    symbols[it->second].no_share = true;
+                // Floating point DATA: "X%" or "X%()"
+                if(ti + 1 < s.toks.size() && s.toks[ti + 1].kind == tk::punct &&
+                   s.toks[ti + 1].lit.compare(0, 1, "%") == 0)
+                    symbols[it->second].no_share = true;
+            }
+            else if(ti > 0)
+            {
+                // Address taken: "&X" (the address operator, not the bitwise AND) or "ADR(X"
                 auto &pt = s.toks[ti - 1];
                 if((pt.kind == tk::punct && pt.lit == "&" && pt.table != "BIT_EXPR_MORE") ||
-                   (pt.kind == tk::kw && (pt.lit == "ADR(" || pt.lit == "Adr(")))
+                   (pt.kind == tk::kw && pt.lit == "ADR("))
                     symbols[it->second].no_share = true;
             }
         }
@@ -110,11 +125,12 @@ void renamer::assign_same()
     }
 }
 
-void renamer::assign_short(const std::set<std::string> &reserved,
+void renamer::assign_short(const std::set<std::string> &reserved, bool share_labels,
                            const std::set<std::string> &extra_used)
 {
     vars.clear();
     labels.clear();
+    shared = false;
     // Sort by usage, most used first
     std::vector<symbol_info *> values, procs;
     for(auto &s : symbols)
@@ -143,18 +159,24 @@ void renamer::assign_short(const std::set<std::string> &reserved,
         if(s->no_share)
             no_share.insert(nm);
     }
-    // PROC, DATA and DLI names: their own name space, so they start again
-    // from "A", skipping only the names labels must not share.
-    n = 0;
+    // PROC, DATA and DLI names: their own name space, so each one takes the
+    // first name not used by another label, skipping the names it must not
+    // share with variables.
+    std::set<std::string> used_labels;
     for(auto s : procs)
     {
+        bool apart = s->no_share || !share_labels;
         std::string nm;
+        n = 0;
         do
             nm = short_name(n++);
-        while(bad(nm) || (!s->is_proc && (no_share.count(nm) || extra_used.count(nm) ||
-                                          (s->no_share && all_vars.count(nm)))));
+        while(bad(nm) || used_labels.count(nm) ||
+              (!s->is_proc && (no_share.count(nm) || extra_used.count(nm) ||
+                               (apart && all_vars.count(nm)))));
+        used_labels.insert(nm);
         s->new_name = nm;
         labels[s->name] = nm;
+        shared = shared || (!s->is_proc && all_vars.count(nm));
     }
 }
 

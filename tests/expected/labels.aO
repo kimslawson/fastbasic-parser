@@ -1,0 +1,33 @@
+' Renamed variables (source -> this listing):
+'   count -> D, total -> A, ratio -> B, text -> E, i -> C
+' Renamed labels (DATA, DLI and PROC names):
+'   bytes -> A, words -> F, floats -> G, changed -> H
+
+' ==== line 1 of 3 (75 characters) ====
+' DATA names share one-letter names with variables, except where FastBasic
+' would read them as the variable.
+data A() byte = 1, 2, 3
+data F() = 1000, 2000
+data G%() = 1.5, 2.25
+data H() byte = 0, 0
+D = 3
+A = 0
+B% = 0.5
+' ==== line 2 of 3 (78 characters) ====
+E$ = "LABELS"
+
+for C = 0 to D - 1
+  A = A + A(C)
+next C
+
+' Addresses of integer and floating point DATA
+print adr(A), adr(F), adr(G%)
+' Floating point DATA, read next to floating point variables
+B% = B% + G%(1)
+' Assigned to, also after THEN
+F(1) = A
+if A > 5 then H(1) = A
+' ==== line 3 of 3 (38 characters) ====
+get F(0)
+input "?"; F(1)
+print A, B%, E$, H(1), F(1)

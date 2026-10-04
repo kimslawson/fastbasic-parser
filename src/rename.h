@@ -45,11 +45,14 @@ class renamer
     std::vector<symbol_info> symbols;
     // orig -> new
     std::map<std::string, std::string> vars, labels;
+    // A DATA or DLI name shares the name of a variable
+    bool shared = false;
 
     // Collects the symbols in the program
     explicit renamer(const program &p);
-    // Assigns short names, "reserved" are names that can't be used.
-    void assign_short(const std::set<std::string> &reserved,
+    // Assigns short names, "reserved" are names that can't be used. With
+    // "share_labels", DATA and DLI names can reuse the names of variables.
+    void assign_short(const std::set<std::string> &reserved, bool share_labels = true,
                       const std::set<std::string> &extra_used = {});
     // Keeps the original names
     void assign_same();
