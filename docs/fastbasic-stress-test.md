@@ -125,6 +125,22 @@ quirks. When unsure, mark it as a question for the author rather than "fixing" i
 5. `CHR$` and `STR$` results share one temporary buffer: `CHR$(65)=CHR$(66)` is
    true, and `testsuite/tests/func-chr.chk` expects that, but the manual only
    documents it for `[]` slicing. Probably a documentation gap.
+6. CONFIRMED, rejects valid code. `INPUT` into a byte or floating point DATA
+   array fails with "parse error, expected: ','", in the integer and FP
+   targets, while byte and FP `DIM` arrays and word DATA arrays work:
+
+       DATA D() BYTE = 1, 2, 3
+       INPUT D(0)
+
+   Also `INPUT "?", D(0)` and `DATA D%() = 1.5 : INPUT D%(0)`. Cause (see
+   lead 4): `INPUT_VAR` in `basic.syn` tries `VAR_WORD_LVALUE_SADDR` first,
+   whose `E_VAR_CREATE` creates a variable `D` and then accepts it as a word
+   variable; `INPUT_VAR` returns, the `(` doesn't match `INPUT_VAR_MORE`, and
+   the `ARRAY_BYTE_ADDR` (or `float.syn`) alternatives are never tried.
+   Assignments (`D(0)=1`) work because `LINE_ASSIGNMENT` has the `=` inside
+   each alternative. Check the native parser too, and look for other tables
+   that call `VAR_WORD_LVALUE_SADDR` before an array alternative and then
+   continue outside it.
 
 # Deliverables
 
