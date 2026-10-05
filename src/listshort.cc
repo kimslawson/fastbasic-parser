@@ -34,6 +34,7 @@
 #include "optimize.h"
 #include "rename.h"
 #include <algorithm>
+#include <cstdint>
 #include <functional>
 #include <iostream>
 #include <map>
@@ -1284,7 +1285,8 @@ class short_writer
     // Constants replaced by variables
     const_vars cvars;
 
-    short_writer(const grammar &g, const program &p, const list_options &opt)
+    short_writer(const grammar &g, const program &p, const list_options &opt,
+                 bool share_labels)
         : p(p), opt(opt), ren(p), ver(g, p, &nm), kwset(grammar_keywords(g))
     {
         if(opt.opts)
@@ -1303,7 +1305,7 @@ class short_writer
                 if(alpha)
                     reserved.insert(k);
             }
-            ren.assign_short(reserved);
+            ren.assign_short(reserved, share_labels);
         }
         for(auto &v : ren.vars)
             nm.add_var(v.first, v.second);
@@ -1415,11 +1417,15 @@ class short_writer
         std::ostringstream os;
         const char *eol = opt.ascii_eol ? "\n" : "\x9b";
         std::string line;
+        size_t line_src = SIZE_MAX;
         auto flush = [&]()
         {
             if(line.empty())
                 return;
             os << line << eol;
+            stats.line_first.push_back(line_src);
+            stats.line_len.push_back(line.size());
+            line_src = SIZE_MAX;
             stats.lines++;
             stats.bytes += line.size() + 1;
             stats.max_len = std::max<int>(stats.max_len, line.size());
@@ -1488,6 +1494,8 @@ class short_writer
                 line_blocks.clear();
                 line = s.text;
             }
+            if(line_src == SIZE_MAX)
+                line_src = s.first;
             line_blocks.insert(line_blocks.end(), nb.begin(), nb.end());
         }
         flush();
@@ -1509,17 +1517,21 @@ std::map<size_t, std::string> optimize_for_long(const grammar &g, const program 
     list_options o = opt;
     o.full_names = true;
     o.opts = &os;
-    short_writer w(g, p, o);
+    short_writer w(g, p, o, false);
     w.for_long = true;
     if(!w.build())
         return {};
     return w.changed_statements();
 }
 
-bool list_short(std::ostream &out, const grammar &g, const program &p,
-                const list_options &opt, list_stats &stats)
+// Writes the short listing, with DATA and DLI names sharing the names of
+// variables or not. Sets "shared" if any name is shared.
+static bool write_short(std::ostream &out, const grammar &g, const program &p,
+                        const list_options &opt, list_stats &stats, bool share_labels,
+                        bool &shared)
 {
-    short_writer w(g, p, opt);
+    short_writer w(g, p, opt, share_labels);
+    shared = w.names().shared;
     if(!w.build())
         return false;
     if(w.phase2_enabled())
@@ -1550,4 +1562,58 @@ bool list_short(std::ostream &out, const grammar &g, const program &p,
         std::cerr << p.fname << ": " << w.checks() << " statement verifications.\n";
     }
     return true;
+}
+
+namespace
+{
+// Captures the messages written to std::cerr while it exists
+class cerr_capture
+{
+    std::ostringstream buf;
+    std::streambuf *old;
+
+  public:
+    cerr_capture() : old(std::cerr.rdbuf(buf.rdbuf())) {}
+    ~cerr_capture() { std::cerr.rdbuf(old); }
+    std::string text() const { return buf.str(); }
+};
+} // namespace
+
+bool list_short(std::ostream &out, const grammar &g, const program &p,
+                const list_options &opt, list_stats &stats)
+{
+    // DATA and DLI names can share the names of variables, but where that is
+    // safe depends on the grammar (see rename.cc). So when they do, check the
+    // whole listing (the statements are verified one by one, but a variable
+    // created while parsing one can change the next ones), and if that fails
+    // make the listing again with separate names.
+    std::ostringstream os;
+    list_stats st;
+    bool shared, ok;
+    std::string msgs;
+    {
+        cerr_capture cap;
+        ok = write_short(os, g, p, opt, st, true, shared);
+        if(ok && shared)
+        {
+            bool optimized = opt.opts && opt.opts->any();
+            program q;
+            ok = q.parse_text(g, st.pre_text.empty() ? os.str() : st.pre_text, p.fname,
+                              false)
+                     .empty() &&
+                 code_equal(p.full_code(optimized), q.full_code(optimized), st.names);
+        }
+        msgs = cap.text();
+    }
+    if(ok || !shared)
+    {
+        std::cerr << msgs;
+        out << os.str();
+        stats = st;
+        return ok;
+    }
+    if(opt.verbose > 1)
+        std::cerr << p.fname << ": note, DATA and DLI names can't reuse the names of "
+                                "variables in this program.\n";
+    return write_short(out, g, p, opt, stats, false, shared);
 }

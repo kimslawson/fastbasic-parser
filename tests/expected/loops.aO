@@ -1,0 +1,29 @@
+' Renamed variables (source -> this listing):
+'   I -> A, J -> B
+
+' ==== line 1 of 2 (77 characters) ====
+' Control structures
+A = 0
+do
+  inc A
+  if A > 3 then exit
+loop
+while A > 0
+  dec A
+  repeat
+    A = A - 1
+  until A < 2
+wend
+if A = 0
+  print "zero"
+elif A = 1
+' ==== line 2 of 2 (40 characters) ====
+  print "one"
+else
+  print "other"
+endif
+' Old style comment
+for B = 1 to 3
+  print B;
+next B ' trailing comment
+print

@@ -70,6 +70,27 @@ class long_writer
     std::map<size_t, int> indent_adj;          // indentation changes
     bool do_elif, do_fixed;
     verify_mode mode;
+    // Annotated listing: comment lines with the renamed symbols
+    std::vector<std::string> legend;
+
+    void add_legend(const std::string &title, const std::vector<std::string> &items)
+    {
+        if(items.empty())
+            return;
+        legend.push_back(title);
+        std::string line = "'  ";
+        for(size_t i = 0; i < items.size(); i++)
+        {
+            auto item = " " + items[i] + (i + 1 < items.size() ? "," : "");
+            if(line.size() + item.size() > 80 && line.size() > 3)
+            {
+                legend.push_back(line);
+                line = "'  ";
+            }
+            line += item;
+        }
+        legend.push_back(line);
+    }
 
   public:
     // Variables replaced by fixed_vars
@@ -77,11 +98,12 @@ class long_writer
 
     long_writer(const grammar &g, const program &p, const list_options &opt,
                 bool fixed_vars)
-        : p(p), opt(opt), ver(g, p, nullptr),
-          optimized(optimize_for_long(g, p, opt))
+        : p(p), opt(opt), ver(g, p, opt.rename),
+          optimized(opt.rename ? std::map<size_t, std::string>()
+                               : optimize_for_long(g, p, opt))
     {
         do_elif = !opt.opts || !opt.opts->given[OPT_ELIF] || (*opt.opts)[OPT_ELIF];
-        do_fixed = fixed_vars;
+        do_fixed = fixed_vars && !opt.rename;
         for(auto &s : p.stmts)
             for(auto &t : s.toks)
             {
@@ -90,6 +112,33 @@ class long_writer
                 if(t.kind == tk::label && !label_name.count(t.lit))
                     label_name[t.lit] = t.src.empty() ? t.lit : t.src;
             }
+        // Annotated listing: use the names of the short listing, and list the
+        // renamed ones in order of first appearance.
+        if(opt.rename)
+        {
+            std::vector<std::string> vars, labels;
+            std::set<std::string> seen;
+            for(auto &s : p.stmts)
+                for(auto &t : s.toks)
+                {
+                    bool is_var = t.kind == tk::var;
+                    if((!is_var && t.kind != tk::label) ||
+                       !seen.insert((is_var ? "v" : "l") + t.lit).second)
+                        continue;
+                    auto &m = is_var ? opt.rename->var_new : opt.rename->label_new;
+                    auto &names = is_var ? var_name : label_name;
+                    auto it = m.find(t.lit);
+                    if(it != m.end() && it->second != names[t.lit])
+                        (is_var ? vars : labels)
+                            .push_back(names[t.lit] + " -> " + it->second);
+                }
+            add_legend("' Renamed variables (source -> this listing):", vars);
+            add_legend("' Renamed labels (DATA, DLI and PROC names):", labels);
+            for(auto &v : opt.rename->var_new)
+                var_name[v.first] = v.second;
+            for(auto &l : opt.rename->label_new)
+                label_name[l.first] = l.second;
+        }
         mode = (opt.opts && opt.opts->any()) ? verify_mode::optimized : verify_mode::raw;
         apply_optimized();
         if(do_elif)
@@ -653,10 +702,20 @@ class long_writer
         std::vector<std::string> lines;
         int failed = 0, block_line = -1;
         bool last_comment = false, need_blank = false;
+        // Start of the comment lines just before the current statement, so a
+        // line mark goes above the comments that belong to its statement.
+        size_t comment_start = 0;
         auto last_blank = [&]() { return lines.empty() || lines.back().empty(); };
+        // Line marks not written yet: a marked statement can be removed (by the
+        // ELIF conversion) or joined to a block line, the mark then goes before
+        // the next statement written.
+        std::vector<std::string> marks;
         auto &st = p.stmts;
         for(size_t n = 0; n < st.size(); n++)
         {
+            auto mk = opt.marks.find(n);
+            if(mk != opt.marks.end())
+                marks.push_back(mk->second);
             if(removed.count(n))
                 continue;
             auto &s = eff(n);
@@ -708,11 +767,25 @@ class long_writer
                 lines.emplace_back();
             need_blank = s.toks[0].kind == tk::kw && s.toks[0].lit == "ENDProc";
             int ind = s.indent + (indent_adj.count(n) ? indent_adj.at(n) : 0);
+            if(!marks.empty() && !s.is_comment())
+            {
+                // Above the comments just before the statement
+                auto pos = last_comment ? comment_start : lines.size();
+                lines.insert(lines.begin() + pos, marks.begin(), marks.end());
+                marks.clear();
+            }
+            if(s.is_comment() && !last_comment)
+                comment_start = lines.size();
             lines.push_back(std::string(std::max(ind, 0) * opt.indent, ' ') + txt);
             last_comment = s.is_comment();
         }
         while(!lines.empty() && lines.back().empty())
             lines.pop_back();
+        if(!legend.empty())
+        {
+            lines.insert(lines.begin(), std::string());
+            lines.insert(lines.begin(), legend.begin(), legend.end());
+        }
         for(auto &l : lines)
         {
             out << l << "\n";

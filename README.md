@@ -69,6 +69,44 @@ repeat
 ```
 
 
+## Results
+
+Measured on the FastBasic samples and on two finished PUR-120 ten-liners,
+with FastBasic 4.7, against FastBasic's own minimized listing (`-ls:<num>`).
+The numbers are the minimized program's length with each line break counted
+as one character (the program as one line), so line breaking doesn't affect
+them. Every `fbp -O` output compiles to exactly the
+same XEX as the original with the FastBasic 4.7 cross-compiler.
+
+| Program | FastBasic `-ls` | `fbp -O` | Saved | `fbp -O -f` (names kept) |
+|---|---|---|---|---|
+| PUR-120 ten-liner A (hand-golfed) | 1195 | 1170 | 25 (2%) | 1177 |
+| PUR-120 ten-liner B (hand-golfed) | 1154 | 1121 | 33 (3%) | 1134 |
+| FastBasic sample `ahlbench.bas` | 211 | 169 | 42 (20%) | 203 |
+| FastBasic sample `carrera3d.bas` | 1602 | 1186 | 416 (26%) | 1546 |
+| FastBasic sample `dli.bas` | 646 | 588 | 58 (9%) | 632 |
+| FastBasic sample `draw.bas` | 107 | 103 | 4 (4%) | 103 |
+| FastBasic sample `fedora.bas` | 643 | 463 | 180 (28%) | 619 |
+| FastBasic sample `iospeed.bas` | 671 | 563 | 108 (16%) | 663 |
+| FastBasic sample `joyas.bas` | 2442 | 1827 | 615 (25%) | 2407 |
+| FastBasic sample `mastodon.bas` | 834 | 591 | 243 (29%) | 835 |
+| FastBasic sample `nc.bas` | 683 | 547 | 136 (20%) | 670 |
+| FastBasic sample `pi.bas` | 1330 | 1068 | 262 (20%) | 1321 |
+| FastBasic sample `pmtest.bas` | 416 | 272 | 144 (35%) | 401 |
+| FastBasic sample `sieve.bas` | 281 | 208 | 73 (26%) | 269 |
+| `samples/stars.bas` | 593 | 391 | 202 (34%) | 561 |
+
+On ordinary programs most of the saving is renaming. On hand-golfed
+ten-liners, where the names are already short, the rest still counts:
+parenthesis around function arguments (`P.(712)` becomes `P.712`, 2
+characters each), parenthesis made redundant by precedence
+(`((R+M)&-8)*5` is `(R+M)&-8*5`, as `&` binds tighter than `*`), one-statement
+`IF` blocks, and names assigned by frequency, including `_` and labels that
+share a variable's letter. That was 25 and 33 characters on listings already
+packed into 1,200, enough to buy back a feature. (`mastodon.bas` is one
+character longer with `-f` because of the end-of-line escape, below.)
+
+
 ## Usage
 
     fbp [options] [-o output] filenames
@@ -100,6 +138,31 @@ Options:
 
 - `-u`  In long listing, write keywords in uppercase (the default is
         lowercase).
+
+- `-a`  Output an annotated listing: the long listing, with all the
+        comments of the source, but written with the names that the short
+        listing uses, so it reads as the expanded version of exactly the
+        program you submit. A comment block at the top lists the renamed
+        variables and labels, and a comment line marks where each line of
+        the short listing starts, with its length:
+        `' ==== line 3 of 10 (116 characters) ====`. The mark goes above the
+        comments just before that statement. The short listing options
+        (`-n`, `-f`, `-O`, `-S`) decide the names and the line breaks; the
+        long listing itself gets no optimizations except `elif`, so the
+        statements stay as you wrote them. Made for contests that give a
+        bonus for an explained listing next to the packed one.
+
+- `-C fb`  Also check the output with the real compiler: compile the input
+        and the output with the FastBasic cross-compiler `fb` (for the
+        target given with `-t`) and fail if the two binaries differ. Also
+        `--compiler fb` or `--compiler=fb`. The copies are compiled next to
+        the input, so `DATA ... FILE` finds its files (in the temporary
+        folder if that one can't be written), and removed after.
+        With optimizations that change the code (`-S`), the listing before
+        those is the one compiled, as the final one is supposed to differ.
+        This is on top of the built-in verification, and catches what the
+        embedded grammar can't, like a different FastBasic version. Example:
+        `fbp -O -t atari-int -C ~/fastbasic/bin/fastbasic game.bas`.
 
 - `-O`  Optimize the program. Without an argument enables all the
         optimizations that produce the same compiled code; an argument can
@@ -228,7 +291,23 @@ them:
 
 - **One name space for all variable types.** `A`, `A$`, `A%` and `A()` are
   the same name, so there are only 27 one-letter names (`A` to `Z` and `_`).
-  PROC names are in a separate name space and can repeat variable names.
+  PROC, DATA and DLI names are labels, in a separate name space, and can
+  repeat variable names, with some catches where the parser picks the other
+  one: `&X` and `ADR(X)` take the address of DATA `X` before the address of
+  variable `X`, and `X(n)` reads an array variable `X` before DATA `X`. With
+  floating point DATA it's the other way around: `&X%` is read as `&X` if `X`
+  is an integer variable, and `X%(n)` as `X%` if that is a floating point
+  variable. And assigning to a DATA element (`X(0)=1`, also after `THEN`)
+  makes the parser create a variable `X` while it tries other rules, which
+  changes the code if `X` already exists. `fbp` gives labels their own
+  one-letter names and steers clear of those cases, and if sharing a name
+  still fails its verification, it uses separate names for that program.
+
+- **EOL inside strings.** FastBasic's own `-ls` writes an ATASCII end of
+  line inside a string as the raw $9B byte (the compiler keeps reading a line
+  inside quotes). That is 2 characters shorter than `"$9B`, but it shows as a
+  line break in the IDE and in the listing, so `fbp` always uses the `$9B`
+  escape: every line of its output is a real line.
 
 - **Abbreviations and parenthesis.** All statements and functions can be
   abbreviated, including `AND`, `OR`, `MOD` and `EXOR` (`A.`, `O.`, `M.`,

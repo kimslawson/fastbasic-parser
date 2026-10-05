@@ -1,0 +1,32 @@
+' Renamed variables (source -> this listing):
+'   B -> A, C -> D, H -> E, D -> F, I -> B, X -> C, E -> G
+' Renamed labels (DATA, DLI and PROC names):
+'   SHOW -> A
+
+' ==== line 1 of 2 (77 characters) ====
+' Minified-style program with constant variables
+A = 53248
+D = 704
+E$ = "Score: "
+F = -1
+poke D + 1, 15
+for B = 0 to 3
+  poke A + B, B * 16
+next B
+print E$; F; " "; E$
+C = 5
+' ==== line 2 of 2 (54 characters) ====
+C = C + 1
+print C, -A
+if A = 1
+  print 1
+elif D <> 0
+  print 2
+endif
+' Not fixed: used before by a PROC
+exec A
+G = 10
+
+proc A
+  print G
+endproc

@@ -1,0 +1,72 @@
+' Renamed variables (source -> this listing):
+'   starX -> D, starY -> C, score -> F, lives -> E, playerX -> B, i -> A,
+'   joy -> G
+' Renamed labels (DATA, DLI and PROC names):
+'   drawPlayer -> A
+
+' ==== line 1 of 5 (80 characters) ====
+' Catch the falling stars - a sample program for fbp
+'
+' This is a readable source, try:
+'   fbp -S samples/stars.bas    (minimized, for a 10-liner)
+'   fbp -l samples/stars.lst    (back to a readable listing)
+
+graphics 0
+poke 752, 1 ' Hide the cursor
+setcolor 2, 0, 0
+
+dim D(4), C(4)
+F = 0
+E = 3
+B = 20
+
+' Place all the stars at random positions
+for A = 0 to 4
+  D(A) = rand(38) + 1
+  C(A) = rand(10)
+next A
+
+' ==== line 2 of 5 (79 characters) ====
+proc A
+  position B - 1, 22
+  print " ^ ";
+endproc
+
+repeat
+  ' Read the joystick
+  G = stick(0)
+  if G = 11 and B > 1 then B = B - 1
+  if G = 7 and B < 38 then B = B + 1
+  exec A
+
+' ==== line 3 of 5 (73 characters) ====
+  for A = 0 to 4 step 1
+    position D(A), C(A)
+    print " ";
+    C(A) = C(A) + 1
+    if C(A) = 22
+      if abs(D(A) - B) <= 1
+        F = F + 10
+' ==== line 4 of 5 (80 characters) ====
+        sound 0, 100, 10, 8
+      else
+        E = E - 1
+        sound 0, 200, 12, 8
+      endif
+      D(A) = rand(38) + 1
+      C(A) = 0
+    endif
+    position D(A), C(A)
+    print "*";
+' ==== line 5 of 5 (75 characters) ====
+  next A
+
+  position 0, 0
+  print "Score: "; F; "  Lives: "; E; " ";
+  pause 4
+  sound
+until E = 0
+
+position 15, 10
+print "GAME"; chr$(32); "OVER"
+end

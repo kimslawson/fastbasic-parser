@@ -21,6 +21,7 @@
 
 #include "program.h"
 #include "verify.h"
+#include <cstdint>
 #include <map>
 #include <ostream>
 #include <set>
@@ -42,6 +43,11 @@ struct list_options
     const opt_settings *opts = nullptr;
     // Messages
     int verbose = 1;
+    // Annotated listing (-a): a long listing that uses the names of a short
+    // listing, with a comment line before the statements that start each of
+    // its lines (key: number of the statement in the source).
+    const name_map *rename = nullptr;
+    std::map<size_t, std::string> marks;
 };
 
 // Statistics returned from listing
@@ -57,6 +63,10 @@ struct list_stats
     ::const_vars cvars;    // Constants replaced by variables
     int init_stmts = 0;    // Number of statements added at the start
     bool reverse_subst = false; // Variables replaced by constants (fixed_vars)
+    // Short listing: for each output line, the number of the first source
+    // statement in it (or SIZE_MAX if it has only added statements), and its length.
+    std::vector<size_t> line_first;
+    std::vector<int> line_len;
 };
 
 //---------------------------------------------------------------------

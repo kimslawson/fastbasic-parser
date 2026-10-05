@@ -19,9 +19,24 @@
 // rename.cc: Assigns short names to variables and labels
 //
 // In FastBasic, all variables share the same name space independently of
-// the type (so "A", "A$" and "A%" can't coexist), PROC and DATA names share
-// another name space. As DATA names are used in expressions like array
-// variables, those are given names different from all variables.
+// the type (so "A", "A$" and "A%" can't coexist), and PROC, DATA and DLI names
+// share another name space. PROC names can reuse any variable name. DATA and
+// DLI names can reuse variable names too, except where the parser would pick
+// the wrong one:
+//  - "&X" and "ADR(X)" take the address of DATA X before the address of
+//    variable X, and "X(n)" reads an array variable X before DATA X. So labels
+//    don't reuse the names of array variables or of variables whose address
+//    is taken.
+//  - Floating point DATA is tried after the variables: "&X%" is read as "&X"
+//    if X is an integer variable, and "X%(n)" as "X%" if X% is a floating
+//    point variable. So floating point DATA doesn't reuse any variable name.
+//  - Assigning to DATA ("X(0)=1", also after THEN) makes the parser create a
+//    variable X while it tries the other rules, which it can't do if X
+//    already exists, changing the code. So DATA that is assigned to doesn't
+//    reuse any variable name either.
+// These rules come from the grammar, which differs between targets, so
+// list_short verifies the listing and makes it again with separate names if
+// sharing them fails.
 
 #include "rename.h"
 #include <algorithm>
@@ -44,8 +59,9 @@ renamer::renamer(const program &p)
 {
     std::map<std::string, size_t> vidx, lidx;
     for(auto &s : p.stmts)
-        for(auto &t : s.toks)
+        for(size_t ti = 0; ti < s.toks.size(); ti++)
         {
+            auto &t = s.toks[ti];
             if(t.kind != tk::var && t.kind != tk::label)
                 continue;
             bool lbl = t.kind == tk::label;
@@ -68,12 +84,33 @@ renamer::renamer(const program &p)
                 {
                     auto v = p.final_state.vars.find(t.lit);
                     if(v != p.final_state.vars.end())
+                    {
                         si.type = v->second & 0xFF;
+                        si.no_share = var_type_is_array(VarType(si.type));
+                    }
                 }
                 it = idx.emplace(t.lit, symbols.size()).first;
                 symbols.push_back(si);
             }
             symbols[it->second].count++;
+            if(lbl)
+            {
+                // Assigned to: at the start of a statement, or after THEN
+                if(ti == 0 || (s.toks[ti - 1].kind == tk::kw && s.toks[ti - 1].lit == "Then"))
+                    symbols[it->second].no_share = true;
+                // Floating point DATA: "X%" or "X%()"
+                if(ti + 1 < s.toks.size() && s.toks[ti + 1].kind == tk::punct &&
+                   s.toks[ti + 1].lit.compare(0, 1, "%") == 0)
+                    symbols[it->second].no_share = true;
+            }
+            else if(ti > 0)
+            {
+                // Address taken: "&X" (the address operator, not the bitwise AND) or "ADR(X"
+                auto &pt = s.toks[ti - 1];
+                if((pt.kind == tk::punct && pt.lit == "&" && pt.table != "BIT_EXPR_MORE") ||
+                   (pt.kind == tk::kw && pt.lit == "ADR("))
+                    symbols[it->second].no_share = true;
+            }
         }
 }
 
@@ -88,15 +125,16 @@ void renamer::assign_same()
     }
 }
 
-void renamer::assign_short(const std::set<std::string> &reserved,
+void renamer::assign_short(const std::set<std::string> &reserved, bool share_labels,
                            const std::set<std::string> &extra_used)
 {
     vars.clear();
     labels.clear();
+    shared = false;
     // Sort by usage, most used first
     std::vector<symbol_info *> values, procs;
     for(auto &s : symbols)
-        (s.is_proc ? procs : values).push_back(&s);
+        (s.is_label ? procs : values).push_back(&s);
     auto cmp = [](const symbol_info *a, const symbol_info *b)
     { return a->count != b->count ? a->count > b->count : a->first < b->first; };
     std::stable_sort(values.begin(), values.end(), cmp);
@@ -106,8 +144,8 @@ void renamer::assign_short(const std::set<std::string> &reserved,
     auto bad = [&](const std::string &n)
     { return n.size() > 1 && reserved.count(n); };
 
-    // Variables and DATA labels
-    std::set<std::string> data_names;
+    // Variables
+    std::set<std::string> no_share, all_vars;
     int n = 0;
     for(auto s : values)
     {
@@ -116,24 +154,29 @@ void renamer::assign_short(const std::set<std::string> &reserved,
             nm = short_name(n++);
         while(bad(nm) || extra_used.count(nm));
         s->new_name = nm;
-        if(s->is_label)
-        {
-            labels[s->name] = nm;
-            data_names.insert(nm);
-        }
-        else
-            vars[s->name] = nm;
+        vars[s->name] = nm;
+        all_vars.insert(nm);
+        if(s->no_share)
+            no_share.insert(nm);
     }
-    // PROC names
-    n = 0;
+    // PROC, DATA and DLI names: their own name space, so each one takes the
+    // first name not used by another label, skipping the names it must not
+    // share with variables.
+    std::set<std::string> used_labels;
     for(auto s : procs)
     {
+        bool apart = s->no_share || !share_labels;
         std::string nm;
+        n = 0;
         do
             nm = short_name(n++);
-        while(bad(nm) || data_names.count(nm));
+        while(bad(nm) || used_labels.count(nm) ||
+              (!s->is_proc && (no_share.count(nm) || extra_used.count(nm) ||
+                               (apart && all_vars.count(nm)))));
+        used_labels.insert(nm);
         s->new_name = nm;
         labels[s->name] = nm;
+        shared = shared || (!s->is_proc && all_vars.count(nm));
     }
 }
 
